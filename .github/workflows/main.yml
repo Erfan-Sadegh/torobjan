@@ -33,11 +33,21 @@ jobs:
     steps:
       - name: darkube-cli deploy
         run: |
-          darkube deploy \
-            --token "${DEPLOY_TOKEN}" \
-            --app-id "${APP_ID}" \
-            --image-tag "${GITHUB_SHA:0:7}" \
-            --job-id "${GITHUB_RUN_ID}"
+          for attempt in 1 2 3 4 5; do
+            echo "Deploy attempt ${attempt}/5"
+            if darkube deploy \
+              --token "${DEPLOY_TOKEN}" \
+              --app-id "${APP_ID}" \
+              --image-tag "${GITHUB_SHA:0:7}" \
+              --job-id "${GITHUB_RUN_ID}"; then
+              exit 0
+            fi
+            sleep_seconds=$((attempt * 20))
+            echo "Deploy failed. Retrying in ${sleep_seconds}s..."
+            sleep "${sleep_seconds}"
+          done
+          echo "Deploy failed after 5 attempts."
+          exit 1
 
 on:
   push:
