@@ -13,7 +13,7 @@ The app must not use `nginx` as the image name. The workflow in:
 builds this repository's `Dockerfile` with:
 
 ```text
-IMAGE_NAME=torobjan
+IMAGE_NAME=registry.hamdocker.ir/erfanclash20178-calm-moon/torobjan
 ```
 
 ## GitHub Secrets

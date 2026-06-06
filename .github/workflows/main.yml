@@ -4,7 +4,7 @@ jobs:
       image: hamravesh/darkube-cli:v1.1
       options: --user root
     env:
-      IMAGE_NAME: torobjan
+      IMAGE_NAME: registry.hamdocker.ir/erfanclash20178-calm-moon/torobjan
       DOCKER_AUTH_CONFIG: ${{ secrets.DOCKER_AUTH_CONFIG }}
     runs-on: ubuntu-latest
     steps:
