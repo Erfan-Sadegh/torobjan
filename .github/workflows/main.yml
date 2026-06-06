@@ -21,35 +21,6 @@ jobs:
             --file ./Dockerfile \
             --build-context .
 
-  darkube_deploy_torobjan_erfanclash20178_calm_moon_hamravesh_c11:
-    needs: darkube_build_torobjan_erfanclash20178_calm_moon_hamravesh_c11
-    env:
-      DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN_TOROBJAN_ERFANCLASH20178_CALM_MOON_HAMRAVESH_C11 }}
-      APP_ID: ${{ secrets.APP_ID_TOROBJAN_ERFANCLASH20178_CALM_MOON_HAMRAVESH_C11 }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: deploy with Hamravesh API
-        run: |
-          for attempt in 1 2 3 4 5; do
-            echo "Deploy API attempt ${attempt}/5"
-            if curl --fail-with-body --show-error --silent \
-              --retry 2 \
-              --retry-all-errors \
-              --connect-timeout 20 \
-              --max-time 120 \
-              -X PUT "https://api.console.hamravesh.ir/api/v1/darkube/apps/update_from_cli/" \
-              -H "Content-Type: application/json" \
-              --data "{\"trigger_deploy_token\":\"${DEPLOY_TOKEN}\",\"app_id\":\"${APP_ID}\",\"image_tag\":\"${GITHUB_SHA:0:7}\"}"; then
-              echo "Deploy API accepted."
-              exit 0
-            fi
-            sleep_seconds=$((attempt * 20))
-            echo "Deploy API failed. Retrying in ${sleep_seconds}s..."
-            sleep "${sleep_seconds}"
-          done
-          echo "Deploy API failed after 5 attempts."
-          exit 1
-
 on:
   push:
     branches:

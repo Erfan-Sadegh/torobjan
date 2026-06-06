@@ -1,6 +1,7 @@
 # GitHub Actions Deploy
 
-Hamravesh/Darkube is configured to build the app using GitHub Actions.
+Hamravesh/Darkube is configured to build the app image using GitHub Actions.
+Deployment is done manually in the Hamravesh panel by changing the image tag.
 
 ## What Changed
 
@@ -75,8 +76,20 @@ The app starts from the Dockerfile entrypoint.
 
 1. Commit and push to the `main` branch.
 2. GitHub Actions builds the Docker image.
-3. GitHub Actions deploys it to Hamravesh.
-4. Open `/health`; it should return `ok`.
-5. Login to `/admin/login`.
-6. Open `/admin/torob-health`.
-7. If Torob health fails, send the production egress IP to Torob for allowlisting.
+3. In Hamravesh, set the Docker image to:
+
+```text
+registry.hamdocker.ir/erfanclash20178-calm-moon/torobjan
+```
+
+4. Set the image tag to the short commit SHA shown in GitHub Actions, for example:
+
+```text
+5b6cd9d
+```
+
+5. Save changes / deploy in Hamravesh.
+6. Open `/health`; it should return `ok`.
+7. Login to `/admin/login`.
+8. Open `/admin/torob-health`.
+9. If Torob health fails, send the production egress IP to Torob for allowlisting.
