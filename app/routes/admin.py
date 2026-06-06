@@ -116,9 +116,10 @@ async def torob_health(request: Request) -> Response:
     first_result = results[0].name if results else "بدون نتیجه"
     base_url = settings.torob_base_url
     proxy_token_state = "set" if settings.torob_proxy_token else "empty"
+    iw1_state = "set" if settings.torob_iw1_header else "empty"
     cookie_state = "set" if settings.torob_cookie else "empty"
     return Response(
-        f"OK\nTOROB_BASE_URL={base_url}\nTOROB_PROXY_TOKEN={proxy_token_state}\nTOROB_COOKIE={cookie_state}\nfirst_result={first_result}",
+        f"OK\nTOROB_BASE_URL={base_url}\nTOROB_PROXY_TOKEN={proxy_token_state}\nTOROB_IW1_HEADER={iw1_state}\nTOROB_COOKIE={cookie_state}\nfirst_result={first_result}",
         media_type="text/plain; charset=utf-8",
     )
 
@@ -135,7 +136,7 @@ def _torob_health_error_text(exc: TorobClientError) -> str:
     if exc.code == "torob_bot_challenge":
         return (
             "FAILED: torob_bot_challenge\n"
-            "gateway یا upstream ترب صفحه بررسی ربات برگردانده. TOROB_BASE_URL و TOROB_PROXY_TOKEN را چک کن و دوباره تست بگیر."
+            "ترب صفحه بررسی ربات برگردانده. TOROB_IW1_HEADER و whitelist بودن IP production را چک کن."
         )
     if exc.code == "torob_forbidden":
         return "FAILED: torob_forbidden\nدسترسی/session ترب برای این درخواست تایید نشده."

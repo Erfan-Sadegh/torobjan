@@ -186,7 +186,7 @@ def _global_torob_error_message(exc: TorobClientError) -> str:
     if exc.code == "torob_bot_challenge":
         return (
             "ترب فعلا درخواست‌های جستجوی خودکار را تایید نمی‌کند و صفحه بررسی ربات برمی‌گرداند. "
-            "این مشکل مربوط به فایل اکسل نیست. کمی بعد دوباره تست کن یا cookie/session مجاز ترب را در تنظیمات قرار بده."
+            "این مشکل مربوط به فایل اکسل نیست. TOROB_IW1_HEADER و whitelist بودن IP production را چک کن."
         )
     if exc.code == "torob_timeout":
         return (
@@ -219,9 +219,9 @@ def _row_torob_error_message(exc: TorobClientError) -> str:
     if exc.code == "torob_gateway_error":
         return "gateway ترب پاسخ پایدار نداد. کمی بعد تلاش مجدد بزن."
     if exc.code == "torob_bot_challenge":
-        return "جستجو از gateway ترب کامل نشد. کمی بعد تلاش مجدد بزن."
+        return "جستجو از ترب کامل نشد. کمی بعد تلاش مجدد بزن."
     if exc.code == "torob_forbidden":
-        return "دسترسی gateway ترب برای این جستجو تایید نشد."
+        return "دسترسی ترب برای این جستجو تایید نشد."
     return exc.public_message
 
 

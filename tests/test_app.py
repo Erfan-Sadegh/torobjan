@@ -401,7 +401,7 @@ def test_gateway_challenge_after_success_keeps_partial_results(monkeypatch, tmp_
         assert submission is not None
         assert submission.status == "ready"
         assert submission.rows[0].matches
-        assert "gateway" in submission.rows[1].error_message
+        assert "ترب کامل نشد" in submission.rows[1].error_message
         assert "کمی بعد تلاش مجدد" in submission.rows[2].error_message
         submission_id = submission.id
 
