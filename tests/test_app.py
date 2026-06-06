@@ -222,6 +222,14 @@ def test_upload_confirm_admin_export(monkeypatch, tmp_path) -> None:
     assert sheet["H3"].value == "base-2"
     assert sheet["K3"].value == "170000"
 
+    detail = client.get(f"/admin/submissions/{submission_id}")
+    assert detail.status_code == 200
+    assert "09121234567" in detail.text
+
+    listing = client.get("/admin/submissions")
+    assert listing.status_code == 200
+    assert "09121234567" in listing.text
+
 
 def test_forbidden_torob_connection_fails_job_with_clean_message(monkeypatch, tmp_path) -> None:
     from sqlalchemy import create_engine

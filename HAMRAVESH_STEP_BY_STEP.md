@@ -69,6 +69,7 @@ UPLOAD_DIR=/data/uploads
 
 TOROB_BASE_URL=https://api.torob.com
 TOROB_PROXY_TOKEN=
+TOROB_IW1_HEADER=KWLu4Qcd7RRNKuWAymzNGdmLYfa2wBVmd4ZwwHhcdRjyVqD4VuQwzHy6eCF3witN
 TOROB_COOKIE=
 TOROB_CSRF_TOKEN=
 TOROB_TIMEOUT_SECONDS=30
@@ -158,4 +159,3 @@ IP خروجی همروش باید به ترب داده شود یا باید مو
 2. یا برعکس، اگر gateway خراب بود، به API مستقیم برگرد.
 3. redeploy کن.
 4. `/admin/torob-health` را دوباره تست کن.
-

@@ -61,6 +61,8 @@ class TorobClient:
         }
         if settings.torob_proxy_token:
             headers["x-proxy-token"] = settings.torob_proxy_token
+        if settings.torob_iw1_header:
+            headers["x-iw1"] = settings.torob_iw1_header
         if settings.torob_cookie:
             headers["cookie"] = settings.torob_cookie
         if settings.torob_csrf_token:

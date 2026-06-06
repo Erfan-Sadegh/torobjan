@@ -15,6 +15,7 @@ class Settings(BaseSettings):
 
     torob_base_url: str = "https://api.torob.com"
     torob_proxy_token: str = ""
+    torob_iw1_header: str = ""
     torob_cookie: str = ""
     torob_csrf_token: str = ""
     torob_instance_id: int = 411147

@@ -11,6 +11,7 @@
         <tr>
           <th>شناسه</th>
           <th>فروشگاه</th>
+          <th>موبایل</th>
           <th>Shop ID</th>
           <th>وضعیت</th>
           <th>تعداد</th>
@@ -24,6 +25,7 @@
           <tr>
             <td>{{ item.id }}</td>
             <td>{{ item.store_name }}</td>
+            <td class="ltr">{{ item.seller_phone or "-" }}</td>
             <td>{{ item.shop_id or "-" }}</td>
             <td>{{ item.status }}</td>
             <td>{{ item.total_rows }}</td>
@@ -32,11 +34,10 @@
             <td><a href="/admin/submissions/{{ item.id }}">جزئیات</a></td>
           </tr>
         {% else %}
-          <tr><td colspan="8">هنوز چیزی ثبت نشده است.</td></tr>
+          <tr><td colspan="9">هنوز چیزی ثبت نشده است.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </section>
 {% endblock %}
-

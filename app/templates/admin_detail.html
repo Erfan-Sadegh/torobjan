@@ -12,6 +12,10 @@
         <input type="text" value="{{ submission.store_name }}" disabled>
       </div>
       <div class="field">
+        <label>شماره موبایل</label>
+        <input class="ltr" type="text" value="{{ submission.seller_phone or '-' }}" disabled>
+      </div>
+      <div class="field">
         <label for="shop_id">Shop ID</label>
         <input id="shop_id" name="shop_id" type="text" value="{{ submission.shop_id or '' }}">
       </div>

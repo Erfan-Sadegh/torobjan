@@ -85,3 +85,24 @@ async def test_torob_client_maps_gateway_404(monkeypatch) -> None:
         await client.search_base_products("رب گوجه")
 
     assert exc.value.code == "torob_gateway_not_found"
+
+
+@pytest.mark.asyncio
+async def test_torob_client_sends_iw1_header(monkeypatch) -> None:
+    captured_headers = {}
+
+    class FakeAsyncClient:
+        async def get(self, *args, **kwargs):
+            captured_headers.update(kwargs["headers"])
+            return httpx.Response(200, json={"results": []}, request=httpx.Request("GET", "https://example.test"))
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr("httpx.AsyncClient", lambda timeout: FakeAsyncClient())
+    monkeypatch.setattr("app.services.torob.settings.torob_iw1_header", "test-iw1")
+    client = TorobClient()
+
+    await client.search_base_products("رب گوجه")
+
+    assert captured_headers["x-iw1"] == "test-iw1"
