@@ -43,7 +43,6 @@ def upgrade() -> None:
         sa.Column("final_price", sa.String(length=80), nullable=True),
         sa.Column("selected_match_id", sa.Integer(), nullable=True),
         sa.ForeignKeyConstraint(["submission_id"], ["submissions.id"]),
-        sa.ForeignKeyConstraint(["selected_match_id"], ["torob_matches.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_table(
@@ -61,11 +60,23 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["row_id"], ["submission_rows.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
+    op.create_foreign_key(
+        "fk_submission_rows_selected_match_id_torob_matches",
+        "submission_rows",
+        "torob_matches",
+        ["selected_match_id"],
+        ["id"],
+    )
     op.create_index(op.f("ix_submission_rows_submission_id"), "submission_rows", ["submission_id"], unique=False)
     op.create_index(op.f("ix_torob_matches_row_id"), "torob_matches", ["row_id"], unique=False)
 
 
 def downgrade() -> None:
+    op.drop_constraint(
+        "fk_submission_rows_selected_match_id_torob_matches",
+        "submission_rows",
+        type_="foreignkey",
+    )
     op.drop_index(op.f("ix_torob_matches_row_id"), table_name="torob_matches")
     op.drop_index(op.f("ix_submission_rows_submission_id"), table_name="submission_rows")
     op.drop_table("torob_matches")
