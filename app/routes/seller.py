@@ -5,18 +5,18 @@ import re
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import SessionLocal, get_db
 from app.models import Submission, SubmissionRow, SubmissionSelection, TorobMatch
-from app.services.excel import ExcelParseError, build_template_xlsx, parse_products_excel
+from app.services.excel import ExcelParseError, build_template_xlsx, parse_price, parse_products_excel
 from app.services.torob import TorobClient, TorobClientError
 from app.settings import settings
+from app.template_utils import create_templates
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
+templates = create_templates()
 
 
 @router.get("/")
@@ -357,7 +357,8 @@ async def confirm_submission(
         for selection in list(row.selections):
             db.delete(selection)
         selected_values = [str(value) for value in form.getlist(f"selected_{row.id}")]
-        price_value = str(form.get(f"price_{row.id}") or "").strip()
+        raw_price_value = str(form.get(f"price_{row.id}") or "").strip()
+        price_value = parse_price(raw_price_value) or ""
         row.selected_match_id = None
         row.final_price = None
         if not selected_values or not price_value:

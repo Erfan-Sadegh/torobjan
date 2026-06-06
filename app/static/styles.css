@@ -240,6 +240,89 @@ input[type="file"] {
   max-width: 100%;
 }
 
+.file-picker {
+  position: relative;
+  min-width: 0;
+}
+
+.file-picker input[type="file"] {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+}
+
+.file-drop {
+  min-height: 76px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px dashed #cfd5df;
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+
+.file-drop:hover {
+  border-color: rgba(215, 57, 72, 0.58);
+  background: #fffafa;
+}
+
+.file-picker.has-file .file-drop {
+  border-style: solid;
+  border-color: rgba(21, 115, 71, 0.42);
+  background: #fbfffd;
+}
+
+.file-picker.needs-file .file-drop {
+  border-color: #f97066;
+  background: #fff3f2;
+}
+
+.file-drop-icon {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--torob);
+  background: rgba(215, 57, 72, 0.08);
+}
+
+.file-drop-icon svg {
+  width: 22px;
+  height: 22px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.file-drop-title,
+.file-drop-subtitle {
+  display: block;
+}
+
+.file-drop-title {
+  color: var(--ink);
+  font-weight: 800;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.file-drop-subtitle {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
 .help-tip {
   position: relative;
   width: 32px;
@@ -366,6 +449,42 @@ input[type="file"] {
   margin: 14px 0 0;
 }
 
+.selection-summary {
+  width: fit-content;
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--muted);
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.selection-summary strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.selection-summary.has-selection {
+  border-color: rgba(215, 57, 72, 0.22);
+  color: #4b5563;
+}
+
+.selection-summary.has-selection strong {
+  color: var(--torob);
+}
+
+.selection-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--line);
+}
+
 .row-card {
   margin: 18px 0;
   padding: 16px;
@@ -440,6 +559,7 @@ input[type="file"] {
 }
 
 .product-card {
+  position: relative;
   min-height: 100%;
   display: grid;
   grid-template-rows: 130px auto;
@@ -454,6 +574,46 @@ input[type="file"] {
 .product-option input[type="checkbox"]:checked + .product-card {
   border-color: var(--torob);
   box-shadow: 0 0 0 2px rgba(215, 57, 72, 0.12);
+}
+
+.product-option input[type="radio"]:focus-visible + .product-card,
+.product-option input[type="checkbox"]:focus-visible + .product-card {
+  outline: 2px solid rgba(215, 57, 72, 0.28);
+  outline-offset: 2px;
+}
+
+.select-mark {
+  position: absolute;
+  inset-block-start: 8px;
+  inset-inline-start: 8px;
+  z-index: 2;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--torob);
+  color: white;
+  box-shadow: 0 6px 16px rgba(215, 57, 72, 0.24);
+  opacity: 0;
+  transform: scale(0.9);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.select-mark svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.product-option input[type="radio"]:checked + .product-card .select-mark,
+.product-option input[type="checkbox"]:checked + .product-card .select-mark {
+  opacity: 1;
+  transform: scale(1);
 }
 
 .product-card img {
@@ -477,8 +637,14 @@ input[type="file"] {
 }
 
 .price-line {
-  color: var(--muted);
+  width: fit-content;
+  max-width: 100%;
+  color: #4b5563;
+  background: #f6f7f9;
+  border-radius: 6px;
+  padding: 4px 7px;
   font-size: 12px;
+  line-height: 1.7;
 }
 
 .row-actions {

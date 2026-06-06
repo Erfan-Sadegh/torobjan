@@ -4,7 +4,6 @@ import hmac
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
@@ -12,9 +11,10 @@ from app.models import Submission, SubmissionRow, SubmissionSelection
 from app.services.excel import build_export_xlsx
 from app.services.torob import TorobClient, TorobClientError
 from app.settings import settings
+from app.template_utils import create_templates
 
 router = APIRouter(prefix="/admin")
-templates = Jinja2Templates(directory="app/templates")
+templates = create_templates()
 ADMIN_COOKIE = "torobjan_admin"
 
 

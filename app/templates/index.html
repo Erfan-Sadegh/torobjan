@@ -35,7 +35,23 @@
     </div>
     <div class="field">
       <label for="file">فایل اکسل محصولات</label>
-      <input id="file" name="file" type="file" accept=".xls,.xlsx" required>
+      <div class="file-picker">
+        <input id="file" name="file" type="file" accept=".xls,.xlsx" required>
+        <label class="file-drop" for="file">
+          <span class="file-drop-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"></path>
+              <path d="M14 3v5h5"></path>
+              <path d="M8 13h8"></path>
+              <path d="M8 17h5"></path>
+            </svg>
+          </span>
+          <span>
+            <span class="file-drop-title" data-file-title>فایل اکسل را انتخاب کن</span>
+            <span class="file-drop-subtitle" data-file-subtitle>هنوز فایلی انتخاب نشده است.</span>
+          </span>
+        </label>
+      </div>
     </div>
     <div>
       <button class="btn submit-btn" type="submit">
@@ -47,8 +63,36 @@
 </section>
 <script>
   document.querySelectorAll(".upload-form").forEach((form) => {
+    const fileInput = form.querySelector('input[type="file"]');
+    const filePicker = form.querySelector(".file-picker");
+    const fileTitle = form.querySelector("[data-file-title]");
+    const fileSubtitle = form.querySelector("[data-file-subtitle]");
+    if (fileInput && filePicker && fileTitle && fileSubtitle) {
+      fileInput.addEventListener("change", () => {
+        const fileName = fileInput.files && fileInput.files.length ? fileInput.files[0].name : "";
+        filePicker.classList.toggle("has-file", Boolean(fileName));
+        filePicker.classList.remove("needs-file");
+        fileTitle.textContent = fileName || "فایل اکسل را انتخاب کن";
+        fileSubtitle.textContent = fileName ? "فایل آماده آپلود است." : "هنوز فایلی انتخاب نشده است.";
+        form.querySelectorAll(".file-error").forEach((item) => item.remove());
+      });
+    }
+
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
+      form.querySelectorAll(".file-error").forEach((item) => item.remove());
+      if (fileInput && (!fileInput.files || !fileInput.files.length)) {
+        if (filePicker) filePicker.classList.add("needs-file");
+        const error = document.createElement("div");
+        error.className = "error file-error";
+        error.textContent = "برای شروع، فایل اکسل محصولات را انتخاب کن.";
+        if (filePicker) {
+          filePicker.after(error);
+        } else {
+          form.prepend(error);
+        }
+        return;
+      }
       const button = form.querySelector(".submit-btn");
       if (button) {
         button.disabled = true;

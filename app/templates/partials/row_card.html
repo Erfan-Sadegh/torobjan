@@ -1,9 +1,10 @@
-<article class="row-card" id="row-{{ row.id }}">
+<article class="row-card" id="row-{{ row.id }}" {% if row.matches and not row.error_message %}data-selectable-row="true"{% endif %}>
   <div class="row-head">
     <div>
       <div class="row-title">ردیف {{ row.input_row }}: {{ row.input_product_name }}</div>
-      {% if row.input_price %}
-        <div class="hint">قیمت فایل: {{ row.input_price }}</div>
+      {% set file_price = row.input_price|price_input %}
+      {% if file_price %}
+        <div class="hint">قیمت فایل: {{ file_price }} تومان</div>
       {% endif %}
     </div>
     {% if row.error_message %}
@@ -29,12 +30,26 @@
     <div class="products">
       {% for match in row.matches %}
         <label class="product-option">
-          <input type="checkbox" name="selected_{{ row.id }}" value="{{ match.id }}" {% if loop.first %}checked{% endif %}>
+          <input type="checkbox" name="selected_{{ row.id }}" value="{{ match.id }}">
           <span class="product-card">
+            <span class="select-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M20 6 9 17l-5-5"></path>
+              </svg>
+            </span>
             <img src="{{ match.image_url or '/static/placeholder.svg' }}" alt="">
             <span class="product-body">
               <span class="product-name">{{ match.name }}</span>
-              <span class="price-line">{{ match.price_text or match.price or "قیمت نامشخص" }}</span>
+              {% set torob_price = match.price|price %}
+              <span class="price-line">
+                {% if torob_price %}
+                  قیمت در ترب: {{ torob_price }} تومان
+                {% elif match.price_text %}
+                  قیمت در ترب: {{ match.price_text }}
+                {% else %}
+                  قیمت در ترب نامشخص است
+                {% endif %}
+              </span>
               {% if match.is_already_added %}
                 <span class="badge ok">قبلا اضافه شده</span>
               {% endif %}
@@ -46,7 +61,7 @@
     <div class="row-actions">
       <div class="field">
         <label for="price_{{ row.id }}">قیمت نهایی تومان</label>
-        <input id="price_{{ row.id }}" name="price_{{ row.id }}" type="text" inputmode="numeric" value="{{ row.input_price or '' }}" required>
+        <input id="price_{{ row.id }}" name="price_{{ row.id }}" type="text" inputmode="numeric" value="{{ row.input_price|price_input }}" required>
         <span class="hint">اگر چند محصول انتخاب کنی، همین قیمت برای همه‌شان در خروجی ثبت می‌شود.</span>
       </div>
     </div>

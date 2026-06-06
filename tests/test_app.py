@@ -192,6 +192,11 @@ def test_upload_confirm_admin_export(monkeypatch, tmp_path) -> None:
     match_page = client.get(f"/submissions/{submission_id}/match")
     assert match_page.status_code == 200
     assert "رب گوجه روژین ترب" in match_page.text
+    assert f'value="{match_id}" checked' not in match_page.text
+    assert f'value="{second_match_id}" checked' not in match_page.text
+    assert "قیمت در ترب: 150,000 تومان" in match_page.text
+    assert 'value="165,000"' in match_page.text
+    assert "محصول انتخاب شده" in match_page.text
 
     confirm = client.post(
         f"/submissions/{submission_id}/confirm",
@@ -526,6 +531,9 @@ def test_index_has_loading_submit_state() -> None:
 
     assert response.status_code == 200
     assert "upload-form" in response.text
+    assert "file-drop" in response.text
+    assert "هنوز فایلی انتخاب نشده است" in response.text
+    assert "برای شروع، فایل اکسل محصولات را انتخاب کن" in response.text
     assert "در حال پردازش فایل" in response.text
     assert "fetch(form.action" in response.text
     assert "شماره موبایل، اختیاری" in response.text
