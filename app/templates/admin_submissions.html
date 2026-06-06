@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="shell admin-layout">
+  <div class="row-head">
+    <h1>Submissionها</h1>
+    <a href="/admin/logout">خروج</a>
+  </div>
+  <div class="panel">
+    <table>
+      <thead>
+        <tr>
+          <th>شناسه</th>
+          <th>فروشگاه</th>
+          <th>Shop ID</th>
+          <th>وضعیت</th>
+          <th>تعداد</th>
+          <th>انتخاب‌شده</th>
+          <th>تاریخ</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in submissions %}
+          <tr>
+            <td>{{ item.id }}</td>
+            <td>{{ item.store_name }}</td>
+            <td>{{ item.shop_id or "-" }}</td>
+            <td>{{ item.status }}</td>
+            <td>{{ item.total_rows }}</td>
+            <td>{{ item.selected_rows }}</td>
+            <td class="ltr">{{ item.created_at }}</td>
+            <td><a href="/admin/submissions/{{ item.id }}">جزئیات</a></td>
+          </tr>
+        {% else %}
+          <tr><td colspan="8">هنوز چیزی ثبت نشده است.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+

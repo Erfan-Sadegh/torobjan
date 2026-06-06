@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="shell hero">
+  <h1>محصولات ثبت شد</h1>
+  <p>به زودی محصولات انتخاب‌شده در فروشگاهت قرار می‌گیرد.</p>
+</section>
+<section class="shell">
+  <div class="success">کد پیگیری: {{ submission.id }}</div>
+  <div class="section-actions inline-actions">
+    <a class="btn secondary" href="/">بازگشت به صفحه اصلی</a>
+  </div>
+</section>
+{% endblock %}

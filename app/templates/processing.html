@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="shell hero">
+  <h1>در حال آماده‌سازی محصولات {{ submission.store_name }}</h1>
+  <p>فایل دریافت شد. حالا داریم ردیف‌های اکسل را با محصولات ترب تطبیق می‌دهیم. این صفحه خودش به‌روزرسانی می‌شود.</p>
+</section>
+
+<section class="shell">
+  <div id="processing-state" class="panel">
+    <div class="progress-title">شروع پردازش...</div>
+    <div class="hint">لطفا این صفحه را نبند.</div>
+  </div>
+</section>
+<script>
+  (() => {
+    const statusUrl = "/submissions/{{ submission.id }}/processing-status";
+    const poll = async () => {
+      try {
+        const response = await fetch(statusUrl, { headers: { "X-Requested-With": "fetch" } });
+        const redirectTo = response.headers.get("HX-Redirect");
+        if (redirectTo) {
+          window.location.href = redirectTo;
+          return;
+        }
+        const html = await response.text();
+        const state = document.querySelector("#processing-state");
+        if (state && html.trim()) {
+          state.outerHTML = html;
+        }
+        if (response.headers.get("X-Processing-State") === "failed") {
+          return;
+        }
+        if (response.status >= 500) {
+          return;
+        }
+        window.setTimeout(poll, 2500);
+      } catch {
+        window.setTimeout(poll, 3500);
+      }
+    };
+    window.setTimeout(poll, 800);
+  })();
+</script>
+{% endblock %}

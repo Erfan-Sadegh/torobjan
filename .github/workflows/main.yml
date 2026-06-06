@@ -1,0 +1,41 @@
+jobs:
+  darkube_build_torobjan_erfanclash20178_calm_moon_hamravesh_c11:
+    container:
+      image: hamravesh/darkube-cli:v1.1
+      options: --user root
+    env:
+      IMAGE_NAME: torobjan
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout commit
+        uses: actions/checkout@v4
+
+      - name: darkube-cli build and push
+        run: |
+          darkube build --push \
+            -t $IMAGE_NAME:${GITHUB_SHA:0:7} \
+            -t $IMAGE_NAME:${GITHUB_REF_NAME} \
+            --docker-auth-config ${{ secrets.DOCKER_AUTH_CONFIG }} \
+            --workdir . \
+            --file ./Dockerfile \
+            --build-context .
+
+  darkube_deploy_torobjan_erfanclash20178_calm_moon_hamravesh_c11:
+    container:
+      image: hamravesh/darkube-cli:v1.1
+      options: --user root
+    needs: darkube_build_torobjan_erfanclash20178_calm_moon_hamravesh_c11
+    runs-on: ubuntu-latest
+    steps:
+      - name: darkube-cli deploy
+        run: |
+          darkube deploy \
+            --token ${{ secrets.DEPLOY_TOKEN_TOROBJAN_ERFANCLASH20178_CALM_MOON_HAMRAVESH_C11 }} \
+            --app-id ${{ secrets.APP_ID_TOROBJAN_ERFANCLASH20178_CALM_MOON_HAMRAVESH_C11 }} \
+            --image-tag ${GITHUB_SHA:0:7} \
+            --job-id ${GITHUB_RUN_ID}
+
+on:
+  push:
+    branches:
+      - main

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="shell admin-layout">
+  <form class="panel grid" action="/admin/login" method="post">
+    <h1>ورود ادمین</h1>
+    {% if error %}
+      <div class="error">{{ error }}</div>
+    {% endif %}
+    <div class="field">
+      <label for="password">رمز ادمین</label>
+      <input id="password" name="password" type="password" required>
+    </div>
+    <button class="btn" type="submit">ورود</button>
+  </form>
+</section>
+{% endblock %}
+

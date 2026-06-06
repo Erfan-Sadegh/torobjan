@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="shell admin-layout">
+  <div class="row-head">
+    <h1>جزئیات submission {{ submission.id }}</h1>
+    <a href="/admin/submissions">بازگشت</a>
+  </div>
+  <form class="panel grid" action="/admin/submissions/{{ submission.id }}/shop-id" method="post">
+    <div class="form-grid grid">
+      <div class="field">
+        <label>نام فروشگاه</label>
+        <input type="text" value="{{ submission.store_name }}" disabled>
+      </div>
+      <div class="field">
+        <label for="shop_id">Shop ID</label>
+        <input id="shop_id" name="shop_id" type="text" value="{{ submission.shop_id or '' }}">
+      </div>
+    </div>
+    <div>
+      <button class="btn" type="submit">ذخیره Shop ID</button>
+      <a class="btn secondary" href="/admin/submissions/{{ submission.id }}/export.xlsx">دانلود خروجی اکسل</a>
+    </div>
+  </form>
+
+  <div class="panel" style="margin-top: 18px;">
+    <table>
+      <thead>
+        <tr>
+          <th>ردیف</th>
+          <th>ورودی</th>
+          <th>انتخاب</th>
+          <th>قیمت نهایی</th>
+          <th>خطا</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            <td>{{ row.input_row }}</td>
+            <td>{{ row.input_product_name or "-" }}</td>
+            <td>
+              {% if row.selections %}
+                {% for selection in row.selections %}
+                  <div>{{ selection.match.name }}</div>
+                {% endfor %}
+              {% elif row.selected_match %}
+                {{ row.selected_match.name }}
+              {% else %}
+                -
+              {% endif %}
+            </td>
+            <td>
+              {% if row.selections %}
+                {% for selection in row.selections %}
+                  <div>{{ selection.final_price or "-" }}</div>
+                {% endfor %}
+              {% else %}
+                {{ row.final_price or "-" }}
+              {% endif %}
+            </td>
+            <td>{{ row.error_message or "-" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="shell hero">
+  <h1>انتخاب محصولات فروشگاه {{ submission.store_name }}</h1>
+  {% if valid_count %}
+    <p>{{ valid_count }} ردیف قابل جستجو پیدا شد. برای هر ردیف، نزدیک‌ترین محصول ترب را انتخاب کن و قیمت نهایی فروشگاهت را وارد کن.</p>
+  {% elif parseable_count %}
+    <p>{{ parseable_count }} ردیف از فایل خوانده شد، اما برای آن‌ها نتیجه قابل انتخاب از ترب ساخته نشد. پیام خطاهای هر ردیف را پایین می‌بینی.</p>
+  {% else %}
+    <p>هیچ ردیف قابل جستجویی پیدا نشد. معمولا دلیلش این است که ستون نام محصول در فایل با عنوان قابل تشخیص ثبت نشده یا چند ردیف توضیحی بالای فایل ساختار جدول را نامشخص کرده است.</p>
+  {% endif %}
+</section>
+
+<section class="shell">
+  <div class="section-actions">
+    <a class="btn secondary" href="/">بازگشت به صفحه اصلی</a>
+    <a class="text-link" href="/template.xlsx">دانلود قالب اکسل</a>
+  </div>
+
+  {% if invalid_rows %}
+    <div class="error">
+      {{ invalid_rows|length }} ردیف هنوز نتیجه قابل انتخاب ندارد. برای ردیف‌های مهم می‌تونی تلاش مجدد بزنی.
+    </div>
+  {% endif %}
+
+  {% if parseable_count %}
+  <form action="/submissions/{{ submission.id }}/confirm" method="post">
+  {% endif %}
+    {% for row in rows %}
+      {% include "partials/row_card.html" %}
+    {% endfor %}
+
+  {% if parseable_count %}
+    <div class="sticky-submit">
+      <button class="btn" type="submit">ثبت نهایی و ساخت خروجی</button>
+    </div>
+  </form>
+  {% endif %}
+</section>
+<script>
+  document.addEventListener("click", async (event) => {
+    const button = event.target.closest(".retry-btn");
+    if (!button) return;
+    button.disabled = true;
+    const idleText = button.textContent;
+    button.textContent = "در حال تلاش...";
+    try {
+      const response = await fetch(button.dataset.retryUrl, { method: "POST" });
+      const html = await response.text();
+      const target = document.getElementById(button.dataset.rowTarget);
+      if (target) target.outerHTML = html;
+    } catch {
+      button.disabled = false;
+      button.textContent = idleText;
+    }
+  });
+</script>
+{% endblock %}

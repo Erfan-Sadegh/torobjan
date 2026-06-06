@@ -1,0 +1,35 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql+psycopg://torobjan:torobjan@db:5432/torobjan
+      ADMIN_PASSWORD: change-this-before-deploy
+      SESSION_SECRET: change-this-long-random-secret
+      UPLOAD_DIR: /data/uploads
+      TOROB_BASE_URL: https://api.torob.com
+      TOROB_PROXY_TOKEN: ""
+      TOROB_COOKIE: ""
+      TOROB_CSRF_TOKEN: ""
+      TOROB_TIMEOUT_SECONDS: "30"
+      TOROB_MAX_RETRIES: "1"
+      TOROB_RATE_LIMIT_SECONDS: "0.10"
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      - db
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: torobjan
+      POSTGRES_USER: torobjan
+      POSTGRES_PASSWORD: torobjan
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+volumes:
+  postgres-data:
+  uploads:

@@ -1,0 +1,54 @@
+<article class="row-card" id="row-{{ row.id }}">
+  <div class="row-head">
+    <div>
+      <div class="row-title">ردیف {{ row.input_row }}: {{ row.input_product_name }}</div>
+      {% if row.input_price %}
+        <div class="hint">قیمت فایل: {{ row.input_price }}</div>
+      {% endif %}
+    </div>
+    {% if row.error_message %}
+      <span class="badge warn">بدون نتیجه</span>
+    {% else %}
+      <span class="badge">انتخاب چندتایی</span>
+    {% endif %}
+  </div>
+
+  {% if row.error_message %}
+    <div class="error row-error">
+      <span>{{ row.error_message }}</span>
+      {% if row.input_product_name %}
+        <button class="btn secondary retry-btn"
+                type="button"
+                data-retry-url="/rows/{{ row.id }}/retry"
+                data-row-target="row-{{ row.id }}">
+          تلاش مجدد
+        </button>
+      {% endif %}
+    </div>
+  {% else %}
+    <div class="products">
+      {% for match in row.matches %}
+        <label class="product-option">
+          <input type="checkbox" name="selected_{{ row.id }}" value="{{ match.id }}" {% if loop.first %}checked{% endif %}>
+          <span class="product-card">
+            <img src="{{ match.image_url or '/static/placeholder.svg' }}" alt="">
+            <span class="product-body">
+              <span class="product-name">{{ match.name }}</span>
+              <span class="price-line">{{ match.price_text or match.price or "قیمت نامشخص" }}</span>
+              {% if match.is_already_added %}
+                <span class="badge ok">قبلا اضافه شده</span>
+              {% endif %}
+            </span>
+          </span>
+        </label>
+      {% endfor %}
+    </div>
+    <div class="row-actions">
+      <div class="field">
+        <label for="price_{{ row.id }}">قیمت نهایی تومان</label>
+        <input id="price_{{ row.id }}" name="price_{{ row.id }}" type="text" inputmode="numeric" value="{{ row.input_price or '' }}" required>
+        <span class="hint">اگر چند محصول انتخاب کنی، همین قیمت برای همه‌شان در خروجی ثبت می‌شود.</span>
+      </div>
+    </div>
+  {% endif %}
+</article>

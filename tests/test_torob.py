@@ -1,0 +1,87 @@
+import pytest
+import httpx
+
+from app.services.torob import TorobClient, TorobClientError, _is_bot_challenge, parse_search_results
+
+
+def test_parse_search_results_maps_expected_fields() -> None:
+    data = {
+        "results": [
+            {
+                "random_key": "90a95ec2",
+                "name1": "رب گوجه روژین ۸۰۰ گرم",
+                "price": 119000,
+                "price_text": "از ۱۱۹٫۰۰۰ تومان",
+                "image_url": "https://image.torob.com/a.jpg",
+                "web_client_absolute_url": "/p/90a95ec2/test/",
+                "is_already_added": True,
+            }
+        ]
+    }
+
+    results = parse_search_results(data, size=5, query="رب گوجه")
+
+    assert len(results) == 1
+    assert results[0].base_prk == "90a95ec2"
+    assert results[0].name == "رب گوجه روژین ۸۰۰ گرم"
+    assert results[0].price == 119000
+    assert results[0].product_url == "https://torob.com/p/90a95ec2/test/"
+    assert results[0].is_already_added is True
+
+
+def test_parse_search_results_removes_ads_and_reranks_by_query_tokens() -> None:
+    data = {
+        "results": [
+            {
+                "random_key": "ad",
+                "name1": "تبلیغ نامرتبط",
+                "price": 1,
+                "is_adv": True,
+            },
+            {
+                "random_key": "weak",
+                "name1": "کنسرو گوجه فرنگی",
+                "price": 10,
+                "is_adv": False,
+            },
+            {
+                "random_key": "strong",
+                "name1": "رب گوجه فرنگی روژین ۸۰۰ گرم",
+                "price": 20,
+                "is_adv": False,
+            },
+        ]
+    }
+
+    results = parse_search_results(data, size=5, query="رب گوجه روژین")
+
+    assert [item.base_prk for item in results] == ["strong", "weak"]
+    assert all(item.base_prk != "ad" for item in results)
+
+
+def test_bot_challenge_detection_for_torob_490() -> None:
+    response = httpx.Response(
+        490,
+        headers={"content-type": "text/html; charset=utf-8"},
+        text="<title>آیا شما یک ربات هستید؟‌ | ترب</title>",
+    )
+
+    assert _is_bot_challenge(response) is True
+
+
+@pytest.mark.asyncio
+async def test_torob_client_maps_gateway_404(monkeypatch) -> None:
+    class FakeAsyncClient:
+        async def get(self, *args, **kwargs):
+            return httpx.Response(404, text="404 page not found", headers={"content-type": "text/plain"})
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr("httpx.AsyncClient", lambda timeout: FakeAsyncClient())
+    client = TorobClient()
+
+    with pytest.raises(TorobClientError) as exc:
+        await client.search_base_products("رب گوجه")
+
+    assert exc.value.code == "torob_gateway_not_found"
