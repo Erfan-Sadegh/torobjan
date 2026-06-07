@@ -455,6 +455,53 @@ input[type="file"] {
   padding: 10px 12px;
 }
 
+.resume-card,
+.resume-benefit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid rgba(215, 57, 72, 0.22);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.resume-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.resume-copy strong {
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.resume-copy span,
+.resume-benefit p {
+  margin: 0;
+  color: #4b5563;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.resume-benefit {
+  justify-content: flex-start;
+  margin-top: 12px;
+}
+
+.resume-benefit span {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #fff0f2;
+}
+
 .progress-title {
   font-weight: 800;
   margin-bottom: 12px;
@@ -899,6 +946,15 @@ th {
 
   .section-actions {
     justify-content: flex-end;
+  }
+
+  .resume-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .resume-card .btn {
+    width: 100%;
   }
 
   .products {

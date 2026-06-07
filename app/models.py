@@ -52,6 +52,7 @@ class SubmissionRow(Base):
     selected_match_id: Mapped[int | None] = mapped_column(ForeignKey("torob_matches.id"), nullable=True)
     has_more_matches: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     next_search_page: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     submission: Mapped[Submission] = relationship(back_populates="rows")
     matches: Mapped[list[TorobMatch]] = relationship(

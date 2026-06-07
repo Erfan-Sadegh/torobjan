@@ -4,6 +4,8 @@ import re
 
 from fastapi.templating import Jinja2Templates
 
+from app.settings import settings
+
 
 def format_price(value: object) -> str:
     if value is None:
@@ -40,4 +42,5 @@ def create_templates() -> Jinja2Templates:
     templates.env.filters["price"] = format_price
     templates.env.filters["price_input"] = price_input_value
     templates.env.filters["price_input_for_unit"] = price_input_for_unit
+    templates.env.globals["clarity_project_id"] = settings.clarity_project_id.strip()
     return templates

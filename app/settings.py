@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     admin_password: str = "change-me"
     session_secret: str = "change-this-secret"
     upload_dir: str = "data/uploads"
+    clarity_project_id: str = ""
 
     torob_base_url: str = "https://api.torob.com"
     torob_proxy_token: str = ""

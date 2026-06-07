@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 import re
 
@@ -9,7 +10,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import SessionLocal, get_db
-from app.models import Submission, SubmissionRow, SubmissionSelection, TorobMatch
+from app.models import Submission, SubmissionRow, SubmissionSelection, TorobMatch, utc_now
 from app.services.excel import ExcelParseError, build_template_xlsx, parse_price, parse_products_excel
 from app.services.product_search import ProductSearchClient, ProductSearchError
 from app.settings import settings
@@ -19,11 +20,26 @@ router = APIRouter()
 templates = create_templates()
 INITIAL_MATCH_COUNT = 4
 MATCH_BATCH_PER_SOURCE = 2
+SELLER_DRAFT_COOKIE = "torobjan_latest_submission"
+
+
+@dataclass(frozen=True)
+class SelectionSaveResult:
+    total_selected_count: int
+    submitted_count: int
 
 
 @router.get("/")
-def index(request: Request) -> Response:
-    return templates.TemplateResponse(request, "index.html")
+def index(request: Request, db: Session = Depends(get_db)) -> Response:
+    draft_submission, draft_remaining_count = _get_resume_state(db, request.cookies.get(SELLER_DRAFT_COOKIE))
+    return templates.TemplateResponse(
+        request,
+        "index.html",
+        {
+            "draft_submission": draft_submission,
+            "draft_remaining_count": draft_remaining_count,
+        },
+    )
 
 
 @router.get("/template.xlsx")
@@ -32,6 +48,26 @@ def template_xlsx() -> Response:
         build_template_xlsx(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="torobjan-template.xlsx"'},
+    )
+
+
+def _set_seller_draft_cookie(response: Response, submission_id: int) -> None:
+    response.set_cookie(
+        SELLER_DRAFT_COOKIE,
+        str(submission_id),
+        max_age=60 * 60 * 24 * 30,
+        httponly=True,
+        samesite="lax",
+        secure=settings.app_env == "production",
+    )
+
+
+def _clear_seller_draft_cookie(response: Response) -> None:
+    response.delete_cookie(
+        SELLER_DRAFT_COOKIE,
+        httponly=True,
+        samesite="lax",
+        secure=settings.app_env == "production",
     )
 
 
@@ -100,7 +136,9 @@ async def upload_products(
     if submission.total_rows > 0:
         background_tasks.add_task(process_submission_matches, submission.id)
 
-    return templates.TemplateResponse(request, "processing.html", {"submission": submission})
+    response = templates.TemplateResponse(request, "processing.html", {"submission": submission})
+    _set_seller_draft_cookie(response, submission.id)
+    return response
 
 
 async def process_submission_matches(submission_id: int) -> None:
@@ -404,15 +442,27 @@ async def confirm_submission(
     form = await request.form()
     submission = _get_submission(db, submission_id)
     finish_mode = str(form.get("finish_mode") or "complete")
-    selected_count = _save_submission_selections(form, submission, db)
-    submission.selected_rows = selected_count
+    save_result = _save_submission_selections(form, submission, db, mark_submitted=True)
+    selected_count = save_result.submitted_count
+    submission.selected_rows = save_result.total_selected_count
     submission.status = "ready" if finish_mode == "continue" else "submitted"
     db.commit()
-    return templates.TemplateResponse(
+    remaining_count = _remaining_selectable_count(submission)
+    response = templates.TemplateResponse(
         request,
         "success.html",
-        {"submission": submission, "finish_mode": finish_mode, "selected_count": selected_count},
+        {
+            "submission": submission,
+            "finish_mode": finish_mode,
+            "selected_count": selected_count,
+            "remaining_count": remaining_count,
+        },
     )
+    if finish_mode == "continue" and remaining_count:
+        _set_seller_draft_cookie(response, submission.id)
+    else:
+        _clear_seller_draft_cookie(response)
+    return response
 
 
 @router.post("/submissions/{submission_id}/draft")
@@ -423,22 +473,28 @@ async def save_submission_draft(
 ) -> Response:
     form = await request.form()
     submission = _get_submission(db, submission_id)
-    selected_count = _save_submission_selections(form, submission, db)
-    submission.selected_rows = selected_count
+    save_result = _save_submission_selections(form, submission, db, mark_submitted=False)
+    submission.selected_rows = save_result.total_selected_count
     if submission.status == "submitted":
         submission.status = "ready"
     db.commit()
-    return JSONResponse({"ok": True, "selected_count": selected_count})
+    response = JSONResponse({"ok": True, "selected_count": save_result.total_selected_count})
+    _set_seller_draft_cookie(response, submission.id)
+    return response
 
 
-def _save_submission_selections(form, submission: Submission, db: Session) -> int:
+def _save_submission_selections(form, submission: Submission, db: Session, mark_submitted: bool) -> SelectionSaveResult:
     submitted_price_unit = str(form.get("price_unit") or "").strip()
     if submitted_price_unit in {"toman", "rial"}:
         submission.price_unit = submitted_price_unit
     price_unit = submission.price_unit or "toman"
-    selected_count = 0
+    submitted_count = 0
+    submitted_timestamp = utc_now() if mark_submitted else None
     for row in submission.rows:
         if row.error_message:
+            continue
+        row_is_in_form = f"selected_{row.id}" in form or f"price_{row.id}" in form
+        if row.submitted_at and not row_is_in_form:
             continue
         for selection in list(row.selections):
             db.delete(selection)
@@ -453,10 +509,19 @@ def _save_submission_selections(form, submission: Submission, db: Session) -> in
             continue
         row.selected_match_id = valid_matches[0].id
         row.final_price = price_value
-        selected_count += len(valid_matches)
+        if mark_submitted and row.submitted_at is None:
+            row.submitted_at = submitted_timestamp
+            submitted_count += len(valid_matches)
         for match in valid_matches:
             db.add(SubmissionSelection(row_id=row.id, match_id=match.id, final_price=price_value))
-    return selected_count
+    db.flush()
+    total_selected_count = (
+        db.query(SubmissionSelection)
+        .join(SubmissionRow, SubmissionSelection.row_id == SubmissionRow.id)
+        .filter(SubmissionRow.submission_id == submission.id)
+        .count()
+    )
+    return SelectionSaveResult(total_selected_count=total_selected_count, submitted_count=submitted_count)
 
 
 def _normalize_final_price(value: object, price_unit: str) -> str | None:
@@ -476,21 +541,23 @@ def _normalize_final_price(value: object, price_unit: str) -> str | None:
 
 def _render_match(request: Request, db: Session, submission_id: int) -> Response:
     submission = _get_submission(db, submission_id)
-    parseable_rows = [row for row in submission.rows if row.input_product_name]
-    valid_rows = [row for row in submission.rows if row.input_product_name and row.matches and not row.error_message]
-    invalid_rows = [row for row in submission.rows if row.error_message]
-    price_unit_row_ids = _price_unit_row_ids(submission)
+    visible_rows = _visible_selection_rows(submission)
+    parseable_rows = [row for row in visible_rows if row.input_product_name]
+    valid_rows = [row for row in visible_rows if row.input_product_name and row.matches and not row.error_message]
+    invalid_rows = [row for row in visible_rows if row.error_message]
+    price_unit_row_ids = _price_unit_row_ids(submission, visible_rows)
     return templates.TemplateResponse(
         request,
         "match.html",
         {
             "submission": submission,
-            "rows": submission.rows,
+            "rows": visible_rows,
             "parseable_count": len(parseable_rows),
             "valid_count": len(valid_rows),
             "invalid_rows": invalid_rows,
             "price_unit_row_ids": price_unit_row_ids,
             "submission_price_unit": submission.price_unit,
+            "submitted_rows_count": len([row for row in submission.rows if row.submitted_at]),
         },
     )
 
@@ -508,10 +575,41 @@ def _render_row_card(request: Request, row: SubmissionRow) -> Response:
     )
 
 
-def _price_unit_row_ids(submission: Submission) -> set[int]:
+def _visible_selection_rows(submission: Submission) -> list[SubmissionRow]:
+    return [row for row in submission.rows if row.submitted_at is None]
+
+
+def _remaining_selectable_count(submission: Submission) -> int:
+    return len([row for row in _visible_selection_rows(submission) if row.input_product_name])
+
+
+def _get_resume_state(db: Session, cookie_value: str | None) -> tuple[Submission | None, int]:
+    if not cookie_value or not cookie_value.isdigit():
+        return None, 0
+    submission = (
+        db.query(Submission)
+        .options(
+            selectinload(Submission.rows).selectinload(SubmissionRow.matches),
+            selectinload(Submission.rows).selectinload(SubmissionRow.selections),
+        )
+        .filter(Submission.id == int(cookie_value))
+        .first()
+    )
+    if submission is None:
+        return None, 0
+    if submission.status != "ready":
+        return None, 0
+    remaining_count = _remaining_selectable_count(submission)
+    if remaining_count <= 0:
+        return None, 0
+    return submission, remaining_count
+
+
+def _price_unit_row_ids(submission: Submission, rows: list[SubmissionRow] | None = None) -> set[int]:
     if submission.price_unit:
         return set()
-    valid_rows = [row for row in submission.rows if row.input_product_name and row.matches and not row.error_message]
+    candidate_rows = rows if rows is not None else _visible_selection_rows(submission)
+    valid_rows = [row for row in candidate_rows if row.input_product_name and row.matches and not row.error_message]
     return {row.id for row in valid_rows[:3]}
 
 

@@ -5,6 +5,15 @@
 </section>
 
 <section class="shell">
+  {% if draft_submission %}
+    <div class="resume-card">
+      <div class="resume-copy">
+        <strong>انتخاب محصولات {{ draft_submission.store_name }} ناتمام مانده</strong>
+        <span>{{ draft_remaining_count }} ردیف هنوز مانده. هرچه محصول بیشتری اضافه کنی، بیشتر دیده می‌شی و مشتری بیشتری می‌گیری.</span>
+      </div>
+      <a class="btn" href="/submissions/{{ draft_submission.id }}/match">ادامه انتخاب محصولات</a>
+    </div>
+  {% endif %}
   <div class="section-actions">
     <a class="btn secondary subtle" href="/template.xlsx">دانلود قالب اکسل</a>
     <span class="help-tip" tabindex="0" aria-label="راهنمای فایل اکسل">

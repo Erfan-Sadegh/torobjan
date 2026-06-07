@@ -724,6 +724,93 @@ def test_confirm_converts_rial_prices_to_toman(monkeypatch, tmp_path) -> None:
         assert submission.rows[0].final_price == "120000"
 
 
+def test_continue_submission_hides_submitted_rows_and_shows_resume_card(monkeypatch, tmp_path) -> None:
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    db_path = tmp_path / "test.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(bind=engine)
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    monkeypatch.setattr("app.routes.seller.ProductSearchClient", FakeProductSearchClient)
+    monkeypatch.setattr("app.routes.seller.SessionLocal", TestingSessionLocal)
+    monkeypatch.setattr("app.routes.seller.settings.upload_dir", str(tmp_path / "uploads"))
+
+    app = create_app()
+    app.dependency_overrides[get_db] = override_get_db
+    client = TestClient(app)
+
+    upload = client.post(
+        "/uploads",
+        data={"store_name": "فروشگاه تست", "seller_phone": ""},
+        files={"file": ("products.xlsx", make_multi_row_xlsx(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert upload.status_code == 200
+
+    with TestingSessionLocal() as db:
+        submission = db.query(Submission).first()
+        assert submission is not None
+        first_row = submission.rows[0]
+        second_row = submission.rows[1]
+        submission_id = submission.id
+        first_row_id = first_row.id
+        first_match_id = first_row.matches[0].id
+        second_row_id = second_row.id
+        second_match_id = second_row.matches[0].id
+
+    confirm = client.post(
+        f"/submissions/{submission_id}/confirm",
+        data={
+            f"selected_{first_row_id}": str(first_match_id),
+            f"price_{first_row_id}": "170000",
+            "price_unit": "toman",
+            "finish_mode": "continue",
+        },
+    )
+    assert confirm.status_code == 200
+    assert "1 کالا ثبت شد و به زودی در فروشگاهت قرار می‌گیرد" in confirm.text
+    assert "مشتری بیشتری می‌گیری" in confirm.text
+
+    with TestingSessionLocal() as db:
+        submission = db.query(Submission).first()
+        assert submission.status == "ready"
+        assert submission.rows[0].submitted_at is not None
+        assert submission.rows[1].submitted_at is None
+
+    match_page = client.get(f"/submissions/{submission_id}/match")
+    assert match_page.status_code == 200
+    assert "رب گوجه روژین ترب" not in match_page.text
+    assert "بالم لب ترب" in match_page.text
+
+    draft = client.post(
+        f"/submissions/{submission_id}/draft",
+        data={
+            f"selected_{second_row_id}": str(second_match_id),
+            f"price_{second_row_id}": "99000",
+            "price_unit": "toman",
+        },
+    )
+    assert draft.status_code == 200
+
+    with TestingSessionLocal() as db:
+        submission = db.query(Submission).first()
+        assert len(submission.rows[0].selections) == 1
+        assert len(submission.rows[1].selections) == 1
+
+    home = client.get("/")
+    assert home.status_code == 200
+    assert "انتخاب محصولات فروشگاه تست ناتمام مانده" in home.text
+    assert "2 ردیف هنوز مانده" in home.text
+
+
 def test_index_has_loading_submit_state() -> None:
     app = create_app()
     client = TestClient(app)
@@ -740,6 +827,7 @@ def test_index_has_loading_submit_state() -> None:
     assert "شماره موبایل، اختیاری" in response.text
     assert "وارد کردن دسته جمعی محصولات به ترب، برای فروشندگان حضوری" in response.text
     assert "این نسخه آزمایشی هست؛ لطفا شمارت رو بذار" in response.text
+    assert "clarity.ms/tag" not in response.text
 
 
 def test_health_endpoint() -> None:

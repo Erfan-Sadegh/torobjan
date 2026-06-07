@@ -2,8 +2,8 @@
 {% block content %}
 <section class="shell hero">
   {% if finish_mode == "continue" %}
-    <h1>انتخاب‌ها ذخیره شد</h1>
-    <p>{{ selected_count }} کالا ثبت شد. هر وقت فرصت داشتی می‌تونی ادامه محصولات را انتخاب کنی.</p>
+    <h1>محصولات ثبت شد</h1>
+    <p>{{ selected_count }} کالا ثبت شد و به زودی در فروشگاهت قرار می‌گیرد.</p>
   {% else %}
     <h1>محصولات ثبت شد</h1>
     <p>به زودی محصولات انتخاب‌شده در فروشگاهت قرار می‌گیرد.</p>
@@ -11,8 +11,14 @@
 </section>
 <section class="shell">
   <div class="success">کد پیگیری: {{ submission.id }}</div>
+  {% if finish_mode == "continue" and remaining_count %}
+    <div class="resume-benefit">
+      <span aria-hidden="true">☕</span>
+      <p>هر وقت فرصت داشتی ادامه بده؛ هرچه محصول بیشتری اضافه کنی، بیشتر دیده می‌شی و مشتری بیشتری می‌گیری.</p>
+    </div>
+  {% endif %}
   <div class="section-actions inline-actions">
-    {% if finish_mode == "continue" %}
+    {% if finish_mode == "continue" and remaining_count %}
       <a class="btn" href="/submissions/{{ submission.id }}/match">ادامه انتخاب محصولات</a>
     {% endif %}
     <a class="btn secondary" href="/">بازگشت به صفحه اصلی</a>
