@@ -26,6 +26,36 @@
     </div>
   </form>
 
+  {% if batches %}
+    <div class="panel" style="margin-top: 18px;">
+      <div class="row-head">
+        <h2>ثبت‌های مرحله‌ای</h2>
+        <a class="btn secondary" href="/admin/submissions/{{ submission.id }}/export.xlsx">دانلود کل خروجی</a>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>زمان ثبت</th>
+            <th>ردیف</th>
+            <th>کالا</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for batch in batches %}
+            <tr>
+              <td class="ltr">{{ batch.created_at }}</td>
+              <td>{{ batch.row_count }}</td>
+              <td>{{ batch.selected_count }}</td>
+              <td><a href="/admin/submissions/{{ submission.id }}/export.xlsx?batch={{ batch.key }}">دانلود همین ثبت</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div class="hint">برای جلوگیری از ورود تکراری، وقتی هر مرحله را جدا انجام می‌دهی از «دانلود همین ثبت» استفاده کن.</div>
+    </div>
+  {% endif %}
+
   <div class="panel" style="margin-top: 18px;">
     <table>
       <thead>

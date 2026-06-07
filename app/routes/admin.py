@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hmac
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -16,6 +17,14 @@ from app.template_utils import create_templates
 router = APIRouter(prefix="/admin")
 templates = create_templates()
 ADMIN_COOKIE = "torobjan_admin"
+
+
+@dataclass(frozen=True)
+class SubmissionBatch:
+    key: str
+    created_at: object
+    row_count: int
+    selected_count: int
 
 
 @router.get("/login")
@@ -68,7 +77,7 @@ def submission_detail(request: Request, submission_id: int, db: Session = Depend
     return templates.TemplateResponse(
         request,
         "admin_detail.html",
-        {"submission": submission, "rows": submission.rows},
+        {"submission": submission, "rows": submission.rows, "batches": _submission_batches(submission)},
     )
 
 
@@ -87,14 +96,23 @@ def update_shop_id(
 
 
 @router.get("/submissions/{submission_id}/export.xlsx")
-def export_submission(request: Request, submission_id: int, db: Session = Depends(get_db)) -> Response:
+def export_submission(
+    request: Request,
+    submission_id: int,
+    batch: str | None = None,
+    db: Session = Depends(get_db),
+) -> Response:
     _require_admin(request)
     submission = _get_submission(db, submission_id)
-    content = build_export_xlsx(submission, submission.rows)
+    rows = _batch_rows(submission, batch)
+    content = build_export_xlsx(submission, rows)
+    filename = f"submission-{submission.id}"
+    if batch:
+        filename += f"-batch-{batch}"
     return Response(
         content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="submission-{submission.id}.xlsx"'},
+        headers={"Content-Disposition": f'attachment; filename="{filename}.xlsx"'},
     )
 
 
@@ -141,6 +159,46 @@ def _torob_health_error_text(exc: TorobClientError) -> str:
     if exc.code == "torob_forbidden":
         return "FAILED: torob_forbidden\nدسترسی/session ترب برای این درخواست تایید نشده."
     return f"FAILED: {exc.code}\n{exc.public_message}"
+
+
+def _submission_batches(submission: Submission) -> list[SubmissionBatch]:
+    groups: dict[str, dict[str, object]] = {}
+    for row in submission.rows:
+        if not row.submitted_at or not row.selections:
+            continue
+        key = _row_batch_key(row)
+        item = groups.setdefault(
+            key,
+            {
+                "created_at": row.submitted_at,
+                "row_ids": set(),
+                "selected_count": 0,
+            },
+        )
+        item["row_ids"].add(row.id)
+        item["selected_count"] = int(item["selected_count"]) + len(row.selections)
+    batches = [
+        SubmissionBatch(
+            key=key,
+            created_at=item["created_at"],
+            row_count=len(item["row_ids"]),
+            selected_count=int(item["selected_count"]),
+        )
+        for key, item in groups.items()
+    ]
+    return sorted(batches, key=lambda item: item.created_at, reverse=True)
+
+
+def _batch_rows(submission: Submission, batch: str | None) -> list[SubmissionRow]:
+    if not batch:
+        return submission.rows
+    return [row for row in submission.rows if _row_batch_key(row) == batch]
+
+
+def _row_batch_key(row: SubmissionRow) -> str:
+    if not row.submitted_at:
+        return ""
+    return str(int(row.submitted_at.timestamp() * 1_000_000))
 
 
 def _get_submission(db: Session, submission_id: int) -> Submission:

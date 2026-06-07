@@ -493,8 +493,7 @@ def _save_submission_selections(form, submission: Submission, db: Session, mark_
     for row in submission.rows:
         if row.error_message:
             continue
-        row_is_in_form = f"selected_{row.id}" in form or f"price_{row.id}" in form
-        if row.submitted_at and not row_is_in_form:
+        if row.submitted_at:
             continue
         for selection in list(row.selections):
             db.delete(selection)

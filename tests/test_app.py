@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from io import BytesIO
 
 from fastapi.testclient import TestClient
@@ -743,6 +744,15 @@ def test_continue_submission_hides_submitted_rows_and_shows_resume_card(monkeypa
     monkeypatch.setattr("app.routes.seller.ProductSearchClient", FakeProductSearchClient)
     monkeypatch.setattr("app.routes.seller.SessionLocal", TestingSessionLocal)
     monkeypatch.setattr("app.routes.seller.settings.upload_dir", str(tmp_path / "uploads"))
+    submitted_times = iter(
+        [
+            datetime(2026, 6, 7, 10, 0, tzinfo=timezone.utc),
+            datetime(2026, 6, 7, 10, 5, tzinfo=timezone.utc),
+        ]
+    )
+    monkeypatch.setattr("app.routes.seller.utc_now", lambda: next(submitted_times))
+    monkeypatch.setattr("app.routes.admin.settings.admin_password", "secret")
+    monkeypatch.setattr("app.routes.admin.settings.session_secret", "test-cookie")
 
     app = create_app()
     app.dependency_overrides[get_db] = override_get_db
@@ -809,6 +819,44 @@ def test_continue_submission_hides_submitted_rows_and_shows_resume_card(monkeypa
     assert home.status_code == 200
     assert "انتخاب محصولات فروشگاه تست ناتمام مانده" in home.text
     assert "2 ردیف هنوز مانده" in home.text
+
+    second_confirm = client.post(
+        f"/submissions/{submission_id}/confirm",
+        data={
+            f"selected_{second_row_id}": str(second_match_id),
+            f"price_{second_row_id}": "99000",
+            "price_unit": "toman",
+            "finish_mode": "continue",
+        },
+    )
+    assert second_confirm.status_code == 200
+
+    login = client.post("/admin/login", data={"password": "secret"}, follow_redirects=False)
+    assert login.status_code == 303
+
+    detail = client.get(f"/admin/submissions/{submission_id}")
+    assert detail.status_code == 200
+    assert "ثبت‌های مرحله‌ای" in detail.text
+    assert detail.text.count(f"/admin/submissions/{submission_id}/export.xlsx?batch=") == 2
+
+    all_export = client.get(f"/admin/submissions/{submission_id}/export.xlsx")
+    all_workbook = load_workbook(BytesIO(all_export.content))
+    assert all_workbook.active.max_row == 3
+
+    with TestingSessionLocal() as db:
+        submission = db.query(Submission).first()
+        first_batch = str(int(submission.rows[0].submitted_at.timestamp() * 1_000_000))
+        second_batch = str(int(submission.rows[1].submitted_at.timestamp() * 1_000_000))
+
+    first_export = client.get(f"/admin/submissions/{submission_id}/export.xlsx?batch={first_batch}")
+    first_workbook = load_workbook(BytesIO(first_export.content))
+    assert first_workbook.active.max_row == 2
+    assert first_workbook.active["F2"].value == "رب گوجه روژین"
+
+    second_export = client.get(f"/admin/submissions/{submission_id}/export.xlsx?batch={second_batch}")
+    second_workbook = load_workbook(BytesIO(second_export.content))
+    assert second_workbook.active.max_row == 2
+    assert second_workbook.active["F2"].value == "بالم لب"
 
 
 def test_index_has_loading_submit_state() -> None:
