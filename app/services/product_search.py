@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from app.services.basalam import BasalamClient, BasalamClientError
 from app.services.torob import TorobClient, TorobClientError
 
+BASALAM_EXTRA_WAIT_SECONDS = 0.9
+
 
 @dataclass(frozen=True)
 class ProductSearchResult:
@@ -30,9 +32,10 @@ class ProductSearchClient:
 
     async def search_products(self, query: str, page: int = 0, per_source: int = 2) -> list[ProductSearchResult]:
         torob_size = per_source * (page + 1)
-        torob_task = self.torob.search_base_products(query, size=torob_size, page=0)
-        basalam_task = self.basalam.search_products(query, size=per_source, page=page)
-        torob_response, basalam_response = await asyncio.gather(torob_task, basalam_task, return_exceptions=True)
+        torob_task = asyncio.create_task(self.torob.search_base_products(query, size=torob_size, page=0))
+        basalam_task = asyncio.create_task(self.basalam.search_products(query, size=per_source, page=page))
+        torob_response = await _task_result(torob_task)
+        basalam_response = await _task_result_with_timeout(basalam_task, BASALAM_EXTRA_WAIT_SECONDS)
 
         torob_results: list[ProductSearchResult] = []
         basalam_results: list[ProductSearchResult] = []
@@ -109,6 +112,23 @@ def _interleave(*groups: list[ProductSearchResult]) -> list[ProductSearchResult]
             if index < len(group):
                 combined.append(group[index])
     return combined
+
+
+async def _task_result(task: asyncio.Task):
+    try:
+        return await task
+    except Exception as exc:
+        return exc
+
+
+async def _task_result_with_timeout(task: asyncio.Task, timeout: float):
+    try:
+        return await asyncio.wait_for(task, timeout=timeout)
+    except asyncio.TimeoutError:
+        task.cancel()
+        return BasalamClientError("basalam_timeout", "جستجوی باسلام به موقع آماده نشد.")
+    except Exception as exc:
+        return exc
 
 
 def _to_product_search_error(errors: list[Exception]) -> ProductSearchError:

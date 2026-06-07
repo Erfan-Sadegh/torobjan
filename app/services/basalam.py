@@ -18,7 +18,7 @@ class BasalamSearchResult:
 
 class BasalamClient:
     def __init__(self) -> None:
-        self.base_url = "https://search.basalam.com"
+        self.base_url = "https://openapi.basalam.com"
         self.timeout = 3.0
         self._client: httpx.AsyncClient | None = None
 
@@ -29,12 +29,12 @@ class BasalamClient:
 
     async def search_products(self, query: str, size: int = 2, page: int = 0) -> list[BasalamSearchResult]:
         client = await self._get_client()
-        response = await client.get(
-            f"{self.base_url}/ai-engine/api/v2.0/product/search",
-            params={
+        response = await client.post(
+            f"{self.base_url}/v1/products/search",
+            json={
                 "q": query,
-                "from": max(page, 0) * size,
-                "size": size,
+                "rows": size,
+                "start": max(page, 0) * size,
             },
             headers={
                 "accept": "application/json",
