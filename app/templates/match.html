@@ -57,11 +57,13 @@
     </div>
   </div>
   <div class="modal-backdrop" data-rest-modal hidden>
-    <div class="confirm-modal" role="dialog" aria-modal="true">
-      <h2>انتخاب‌ها ذخیره می‌شود</h2>
-      <p>لازم نیست همه محصولات را یک‌باره تمام کنی. هر وقت خواستی، همین انتخاب‌ها را ثبت کن و بعدا ادامه بده.</p>
+    <div class="confirm-modal rest-modal" role="dialog" aria-modal="true">
+      <button class="modal-x" type="button" data-close-rest-modal aria-label="بستن">×</button>
+      <div class="modal-sticker" aria-hidden="true">☕</div>
+      <h2>انتخاب‌هات ذخیره می‌شود</h2>
+      <p>می‌تونی همین‌هایی که تا الان انتخاب کردی رو اضافه کنی و باقی محصولات رو بین کارهای روزانه‌ات کم‌کم انجام بدی :)</p>
       <div class="modal-actions">
-        <button class="btn" type="button" data-close-rest-modal>متوجه شدم</button>
+        <button class="btn" type="button" data-close-rest-modal>ادامه می‌دم</button>
       </div>
     </div>
   </div>
@@ -239,6 +241,10 @@
     }
     if (event.target.closest("[data-close-rest-modal]")) {
       document.querySelector("[data-rest-modal]").hidden = true;
+    }
+    const restBackdrop = event.target.closest("[data-rest-modal]");
+    if (restBackdrop && event.target === restBackdrop) {
+      restBackdrop.hidden = true;
     }
   });
 

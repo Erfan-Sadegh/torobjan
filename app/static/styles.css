@@ -268,6 +268,8 @@ input[type="file"] {
   margin: 0;
   font-size: 13px;
   line-height: 1.8;
+  color: #374151;
+  font-weight: 800;
 }
 
 .file-picker {
@@ -724,10 +726,11 @@ input[type="file"] {
   gap: 8px;
   align-self: start;
   margin-top: 26px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #fff;
-  padding: 6px 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  min-height: 44px;
 }
 
 .price-unit-card.is-done {
@@ -747,12 +750,12 @@ input[type="file"] {
 }
 
 .unit-option {
-  min-height: 30px;
+  min-height: 34px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #f8f9fb;
   color: var(--ink);
-  padding: 0 9px;
+  padding: 0 11px;
   cursor: pointer;
   font-weight: 800;
 }
@@ -787,6 +790,21 @@ input[type="file"] {
   box-shadow: 0 20px 55px rgba(15, 23, 42, 0.22);
   padding: 18px;
   text-align: center;
+}
+
+.rest-modal {
+  max-width: 440px;
+}
+
+.modal-sticker {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  justify-self: center;
+  border-radius: 999px;
+  background: #fff0f2;
+  font-size: 21px;
 }
 
 .confirm-modal h2 {
@@ -943,6 +961,8 @@ th {
   .price-unit-card {
     width: fit-content;
     margin-top: 0;
+    min-height: auto;
+    flex-wrap: wrap;
   }
 
   .help-content {

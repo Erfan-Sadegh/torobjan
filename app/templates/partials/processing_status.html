@@ -3,13 +3,17 @@
   <div class="progress-bar">
     <span style="width: {{ progress_percent }}%"></span>
   </div>
-  <div class="processing-note">
-    <span aria-hidden="true">☕</span>
-    <p>
-      در حال جستجو در ترب و باسلام. تا پردازش انجام میشه می‌تونی راحت باشی و چند دقیقه دیگه برگردی :)
-      {% if total_count >= 500 %}
-        فعلا تا ۵۰۰ ردیف اول فایل پردازش می‌شود.
-      {% endif %}
-    </p>
-  </div>
+  {% if total_count > 150 %}
+    <div class="processing-note">
+      <span aria-hidden="true">☕</span>
+      <p>
+        در حال جستجو در ترب و باسلام. تا پردازش انجام میشه می‌تونی بری یه چایی بخوری و برگردی، ولی لطفا این صفحه رو نبند :)
+        {% if total_count >= 500 %}
+          فعلا تا ۵۰۰ ردیف اول فایل پردازش می‌شود.
+        {% endif %}
+      </p>
+    </div>
+  {% else %}
+    <div class="hint">در حال پردازش و جستجوی محصولات از ترب و باسلام.</div>
+  {% endif %}
 </div>

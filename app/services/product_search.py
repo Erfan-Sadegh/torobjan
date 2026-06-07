@@ -31,7 +31,8 @@ class ProductSearchClient:
         await asyncio.gather(self.torob.close(), self.basalam.close(), return_exceptions=True)
 
     async def search_products(self, query: str, page: int = 0, per_source: int = 2) -> list[ProductSearchResult]:
-        torob_size = per_source * (page + 1)
+        fallback_size = per_source * 2
+        torob_size = fallback_size * (page + 1)
         torob_task = asyncio.create_task(self.torob.search_base_products(query, size=torob_size, page=0))
         basalam_task = asyncio.create_task(self.basalam.search_products(query, size=per_source, page=page))
         torob_response = await _task_result(torob_task)
@@ -44,8 +45,10 @@ class ProductSearchClient:
         if isinstance(torob_response, Exception):
             errors.append(torob_response)
         else:
-            page_start = page * per_source
-            for result in torob_response[page_start : page_start + per_source]:
+            basalam_count = len(basalam_response) if not isinstance(basalam_response, Exception) else 0
+            page_size = fallback_size - min(basalam_count, per_source)
+            page_start = page * page_size
+            for result in torob_response[page_start : page_start + page_size]:
                 torob_results.append(
                     ProductSearchResult(
                         source="torob",
