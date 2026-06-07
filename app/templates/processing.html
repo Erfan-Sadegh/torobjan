@@ -8,7 +8,15 @@
 <section class="shell">
   <div id="processing-state" class="panel">
     <div class="progress-title">شروع پردازش...</div>
-    <div class="hint">فعلا تا ۵۰۰ ردیف اول فایل پردازش می‌شود. اگر فایل بزرگ است عجله نکن؛ یک چایی بخور و برگرد، اینجا خودش جلو می‌رود.</div>
+    <div class="processing-note">
+      <span aria-hidden="true">☕</span>
+      <p>
+        تا پردازش انجام میشه می‌تونی راحت باشی و چند دقیقه دیگه برگردی :)
+        {% if submission.total_rows >= 500 %}
+          فعلا تا ۵۰۰ ردیف اول فایل پردازش می‌شود.
+        {% endif %}
+      </p>
+    </div>
   </div>
 </section>
 <script>

@@ -663,6 +663,7 @@ def test_load_more_row_matches_appends_next_batch(monkeypatch, tmp_path) -> None
 
     assert response.status_code == 200
     assert "رب ترب 1-1" in response.text
+    assert "price-unit-card" in response.text
     with TestingSessionLocal() as db:
         row = db.query(SubmissionRow).filter(SubmissionRow.id == row_id).first()
         assert len(row.matches) == 8

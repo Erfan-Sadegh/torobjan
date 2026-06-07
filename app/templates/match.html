@@ -24,12 +24,10 @@
     <input type="hidden" name="finish_mode" value="complete" data-finish-mode>
     {% if valid_count %}
       <div class="selection-guide">
-        <div class="selection-summary" data-selection-summary>
-          <span><strong data-selected-count>0</strong> محصول انتخاب شده</span>
-          <span class="selection-divider"></span>
-          <span>از {{ valid_count }} ردیف قابل انتخاب</span>
+        <div class="progress-note">
+          <span class="note-sticker" aria-hidden="true">☕</span>
+          <p>هر تعدادی که انتخاب کردی رو می‌تونی ثبت کنی و هر وقت فرصت داشتی ادامه بدی. انتخاب‌ها ذخیره می‌شود.</p>
         </div>
-        <p>هر تعدادی که انتخاب کردی رو می‌تونی ثبت کنی و هر وقت فرصت داشتی ادامه بدی. انتخاب‌ها ذخیره می‌شود.</p>
       </div>
     {% endif %}
   {% endif %}
@@ -44,18 +42,18 @@
         <span>انتخاب‌شده از {{ valid_count }} ردیف</span>
         <small data-draft-state>انتخاب‌ها ذخیره می‌شود</small>
       </div>
-      <button class="btn" type="submit">تایید و ثبت همین انتخاب‌ها</button>
+      <button class="btn" type="submit" data-submit-button>ثبت 0 محصول انتخاب شده</button>
     </div>
   </form>
   <div class="modal-backdrop" data-confirm-modal hidden>
     <div class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+      <button class="modal-x" type="button" data-close-modal aria-label="بستن">×</button>
       <h2 id="confirm-title">با باقی محصولات چه کار کنیم؟</h2>
       <p>می‌تونی همین انتخاب‌ها رو ثبت کنی و بعدا ادامه بدی، یا اگر باقی محصولات موجود نیستند همین مرحله را نهایی کنی.</p>
       <div class="modal-actions">
         <button class="btn" type="button" data-submit-mode="continue">ثبت و ادامه بعدا</button>
         <button class="btn secondary" type="button" data-submit-mode="complete">ثبت نهایی همین‌ها</button>
       </div>
-      <button class="text-link modal-close" type="button" data-close-modal>برگشت به انتخاب‌ها</button>
     </div>
   </div>
   <div class="modal-backdrop" data-rest-modal hidden>
@@ -86,7 +84,11 @@
     document.querySelectorAll("[data-selected-count]").forEach((item) => {
       item.textContent = selectedCount;
     });
-    document.querySelectorAll("[data-selection-summary], .sticky-submit").forEach((item) => {
+    const submitButton = document.querySelector("[data-submit-button]");
+    if (submitButton) {
+      submitButton.textContent = `ثبت ${selectedCount} محصول انتخاب شده`;
+    }
+    document.querySelectorAll(".sticky-submit").forEach((item) => {
       item.classList.toggle("has-selection", selectedCount > 0);
     });
     maybeShowBreakHint(selectedCount);
@@ -230,6 +232,10 @@
     if (modeButton) submitWithMode(modeButton.dataset.submitMode);
     if (event.target.closest("[data-close-modal]")) {
       document.querySelector("[data-confirm-modal]").hidden = true;
+    }
+    const backdrop = event.target.closest("[data-confirm-modal]");
+    if (backdrop && event.target === backdrop) {
+      backdrop.hidden = true;
     }
     if (event.target.closest("[data-close-rest-modal]")) {
       document.querySelector("[data-rest-modal]").hidden = true;

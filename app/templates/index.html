@@ -73,7 +73,7 @@
         filePicker.classList.toggle("has-file", Boolean(fileName));
         filePicker.classList.remove("needs-file");
         fileTitle.textContent = fileName || "فایل اکسل را انتخاب کن";
-        fileSubtitle.textContent = fileName ? "فایل آماده آپلود است." : "هنوز فایلی انتخاب نشده است.";
+        fileSubtitle.textContent = fileName ? "فایل آپلود شد." : "هنوز فایلی انتخاب نشده است.";
         form.querySelectorAll(".file-error").forEach((item) => item.remove());
       });
     }

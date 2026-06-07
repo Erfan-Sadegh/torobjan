@@ -3,5 +3,13 @@
   <div class="progress-bar">
     <span style="width: {{ progress_percent }}%"></span>
   </div>
-  <div class="hint">در حال جستجو در ترب و باسلام. فعلا تا ۵۰۰ ردیف اول فایل پردازش می‌شود؛ اگر تعداد ردیف‌ها زیاد است، راحت باش و چند دقیقه دیگر برگرد.</div>
+  <div class="processing-note">
+    <span aria-hidden="true">☕</span>
+    <p>
+      در حال جستجو در ترب و باسلام. تا پردازش انجام میشه می‌تونی راحت باشی و چند دقیقه دیگه برگردی :)
+      {% if total_count >= 500 %}
+        فعلا تا ۵۰۰ ردیف اول فایل پردازش می‌شود.
+      {% endif %}
+    </p>
+  </div>
 </div>

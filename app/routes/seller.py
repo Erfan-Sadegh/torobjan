@@ -479,7 +479,7 @@ def _render_match(request: Request, db: Session, submission_id: int) -> Response
     parseable_rows = [row for row in submission.rows if row.input_product_name]
     valid_rows = [row for row in submission.rows if row.input_product_name and row.matches and not row.error_message]
     invalid_rows = [row for row in submission.rows if row.error_message]
-    price_unit_row_ids = {row.id for row in valid_rows[:3]}
+    price_unit_row_ids = _price_unit_row_ids(submission)
     return templates.TemplateResponse(
         request,
         "match.html",
@@ -496,15 +496,23 @@ def _render_match(request: Request, db: Session, submission_id: int) -> Response
 
 
 def _render_row_card(request: Request, row: SubmissionRow) -> Response:
+    submission = row.submission
     return templates.TemplateResponse(
         request,
         "partials/row_card.html",
         {
             "row": row,
-            "price_unit_row_ids": set(),
-            "submission_price_unit": row.submission.price_unit if row.submission else None,
+            "price_unit_row_ids": _price_unit_row_ids(submission) if submission else set(),
+            "submission_price_unit": submission.price_unit if submission else None,
         },
     )
+
+
+def _price_unit_row_ids(submission: Submission) -> set[int]:
+    if submission.price_unit:
+        return set()
+    valid_rows = [row for row in submission.rows if row.input_product_name and row.matches and not row.error_message]
+    return {row.id for row in valid_rows[:3]}
 
 
 def _get_row(db: Session, row_id: int) -> SubmissionRow:
@@ -512,6 +520,7 @@ def _get_row(db: Session, row_id: int) -> SubmissionRow:
         db.query(SubmissionRow)
         .options(selectinload(SubmissionRow.matches))
         .options(selectinload(SubmissionRow.selections))
+        .options(selectinload(SubmissionRow.submission).selectinload(Submission.rows).selectinload(SubmissionRow.matches))
         .filter(SubmissionRow.id == row_id)
         .first()
     )
