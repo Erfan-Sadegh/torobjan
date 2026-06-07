@@ -845,15 +845,18 @@ def test_continue_submission_hides_submitted_rows_and_shows_resume_card(monkeypa
 
     with TestingSessionLocal() as db:
         submission = db.query(Submission).first()
-        first_batch = str(int(submission.rows[0].submitted_at.timestamp() * 1_000_000))
-        second_batch = str(int(submission.rows[1].submitted_at.timestamp() * 1_000_000))
+        assert len(submission.batches) == 2
+        first_batch = [batch for batch in submission.batches if batch.items[0].row_id == first_row_id][0]
+        second_batch = [batch for batch in submission.batches if batch.items[0].row_id == second_row_id][0]
+        assert first_batch.selected_count == 1
+        assert second_batch.selected_count == 1
 
-    first_export = client.get(f"/admin/submissions/{submission_id}/export.xlsx?batch={first_batch}")
+    first_export = client.get(f"/admin/submissions/{submission_id}/export.xlsx?batch={first_batch.id}")
     first_workbook = load_workbook(BytesIO(first_export.content))
     assert first_workbook.active.max_row == 2
     assert first_workbook.active["F2"].value == "رب گوجه روژین"
 
-    second_export = client.get(f"/admin/submissions/{submission_id}/export.xlsx?batch={second_batch}")
+    second_export = client.get(f"/admin/submissions/{submission_id}/export.xlsx?batch={second_batch.id}")
     second_workbook = load_workbook(BytesIO(second_export.content))
     assert second_workbook.active.max_row == 2
     assert second_workbook.active["F2"].value == "بالم لب"

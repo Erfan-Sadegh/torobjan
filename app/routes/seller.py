@@ -10,7 +10,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import SessionLocal, get_db
-from app.models import Submission, SubmissionRow, SubmissionSelection, TorobMatch, utc_now
+from app.models import Submission, SubmissionBatch, SubmissionBatchItem, SubmissionRow, SubmissionSelection, TorobMatch, utc_now
 from app.services.excel import ExcelParseError, build_template_xlsx, parse_price, parse_products_excel
 from app.services.product_search import ProductSearchClient, ProductSearchError
 from app.settings import settings
@@ -27,6 +27,7 @@ SELLER_DRAFT_COOKIE = "torobjan_latest_submission"
 class SelectionSaveResult:
     total_selected_count: int
     submitted_count: int
+    batch_id: int | None = None
 
 
 @router.get("/")
@@ -490,6 +491,7 @@ def _save_submission_selections(form, submission: Submission, db: Session, mark_
     price_unit = submission.price_unit or "toman"
     submitted_count = 0
     submitted_timestamp = utc_now() if mark_submitted else None
+    batch_item_values = []
     for row in submission.rows:
         if row.error_message:
             continue
@@ -513,6 +515,29 @@ def _save_submission_selections(form, submission: Submission, db: Session, mark_
             submitted_count += len(valid_matches)
         for match in valid_matches:
             db.add(SubmissionSelection(row_id=row.id, match_id=match.id, final_price=price_value))
+            if mark_submitted:
+                batch_item_values.append((row.id, match.id, price_value))
+    batch_id = None
+    if mark_submitted and batch_item_values and submitted_timestamp is not None:
+        batch = SubmissionBatch(
+            submission_id=submission.id,
+            status="pending",
+            created_at=submitted_timestamp,
+            updated_at=submitted_timestamp,
+        )
+        db.add(batch)
+        db.flush()
+        batch_id = batch.id
+        for row_id, match_id, price_value in batch_item_values:
+            db.add(
+                SubmissionBatchItem(
+                    batch_id=batch.id,
+                    row_id=row_id,
+                    match_id=match_id,
+                    final_price=price_value,
+                    created_at=submitted_timestamp,
+                )
+            )
     db.flush()
     total_selected_count = (
         db.query(SubmissionSelection)
@@ -520,7 +545,7 @@ def _save_submission_selections(form, submission: Submission, db: Session, mark_
         .filter(SubmissionRow.submission_id == submission.id)
         .count()
     )
-    return SelectionSaveResult(total_selected_count=total_selected_count, submitted_count=submitted_count)
+    return SelectionSaveResult(total_selected_count=total_selected_count, submitted_count=submitted_count, batch_id=batch_id)
 
 
 def _normalize_final_price(value: object, price_unit: str) -> str | None:

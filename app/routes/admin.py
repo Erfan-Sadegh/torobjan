@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hmac
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -8,8 +7,8 @@ from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
-from app.models import Submission, SubmissionRow, SubmissionSelection
-from app.services.excel import build_export_xlsx
+from app.models import Submission, SubmissionBatch, SubmissionBatchItem, SubmissionRow, SubmissionSelection
+from app.services.excel import build_batch_export_xlsx, build_export_xlsx
 from app.services.torob import TorobClient, TorobClientError
 from app.settings import settings
 from app.template_utils import create_templates
@@ -17,14 +16,6 @@ from app.template_utils import create_templates
 router = APIRouter(prefix="/admin")
 templates = create_templates()
 ADMIN_COOKIE = "torobjan_admin"
-
-
-@dataclass(frozen=True)
-class SubmissionBatch:
-    key: str
-    created_at: object
-    row_count: int
-    selected_count: int
 
 
 @router.get("/login")
@@ -77,7 +68,7 @@ def submission_detail(request: Request, submission_id: int, db: Session = Depend
     return templates.TemplateResponse(
         request,
         "admin_detail.html",
-        {"submission": submission, "rows": submission.rows, "batches": _submission_batches(submission)},
+        {"submission": submission, "rows": submission.rows, "batches": _visible_batches(submission)},
     )
 
 
@@ -99,16 +90,18 @@ def update_shop_id(
 def export_submission(
     request: Request,
     submission_id: int,
-    batch: str | None = None,
+    batch: int | None = None,
     db: Session = Depends(get_db),
 ) -> Response:
     _require_admin(request)
     submission = _get_submission(db, submission_id)
-    rows = _batch_rows(submission, batch)
-    content = build_export_xlsx(submission, rows)
     filename = f"submission-{submission.id}"
     if batch:
+        selected_batch = _get_batch(submission, batch)
+        content = build_batch_export_xlsx(submission, selected_batch)
         filename += f"-batch-{batch}"
+    else:
+        content = build_export_xlsx(submission, submission.rows)
     return Response(
         content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -161,44 +154,15 @@ def _torob_health_error_text(exc: TorobClientError) -> str:
     return f"FAILED: {exc.code}\n{exc.public_message}"
 
 
-def _submission_batches(submission: Submission) -> list[SubmissionBatch]:
-    groups: dict[str, dict[str, object]] = {}
-    for row in submission.rows:
-        if not row.submitted_at or not row.selections:
-            continue
-        key = _row_batch_key(row)
-        item = groups.setdefault(
-            key,
-            {
-                "created_at": row.submitted_at,
-                "row_ids": set(),
-                "selected_count": 0,
-            },
-        )
-        item["row_ids"].add(row.id)
-        item["selected_count"] = int(item["selected_count"]) + len(row.selections)
-    batches = [
-        SubmissionBatch(
-            key=key,
-            created_at=item["created_at"],
-            row_count=len(item["row_ids"]),
-            selected_count=int(item["selected_count"]),
-        )
-        for key, item in groups.items()
-    ]
-    return sorted(batches, key=lambda item: item.created_at, reverse=True)
+def _visible_batches(submission: Submission) -> list[SubmissionBatch]:
+    return sorted([batch for batch in submission.batches if batch.items], key=lambda item: item.created_at, reverse=True)
 
 
-def _batch_rows(submission: Submission, batch: str | None) -> list[SubmissionRow]:
-    if not batch:
-        return submission.rows
-    return [row for row in submission.rows if _row_batch_key(row) == batch]
-
-
-def _row_batch_key(row: SubmissionRow) -> str:
-    if not row.submitted_at:
-        return ""
-    return str(int(row.submitted_at.timestamp() * 1_000_000))
+def _get_batch(submission: Submission, batch_id: int) -> SubmissionBatch:
+    for batch in submission.batches:
+        if batch.id == batch_id:
+            return batch
+    raise HTTPException(status_code=404, detail="Batch not found")
 
 
 def _get_submission(db: Session, submission_id: int) -> Submission:
@@ -208,6 +172,8 @@ def _get_submission(db: Session, submission_id: int) -> Submission:
             selectinload(Submission.rows).selectinload(SubmissionRow.matches),
             selectinload(Submission.rows).selectinload(SubmissionRow.selected_match),
             selectinload(Submission.rows).selectinload(SubmissionRow.selections).selectinload(SubmissionSelection.match),
+            selectinload(Submission.batches).selectinload(SubmissionBatch.items).selectinload(SubmissionBatchItem.row),
+            selectinload(Submission.batches).selectinload(SubmissionBatch.items).selectinload(SubmissionBatchItem.match),
         )
         .filter(Submission.id == submission_id)
         .first()

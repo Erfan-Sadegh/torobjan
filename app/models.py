@@ -34,6 +34,11 @@ class Submission(Base):
         cascade="all, delete-orphan",
         order_by="SubmissionRow.input_row",
     )
+    batches: Mapped[list[SubmissionBatch]] = relationship(
+        back_populates="submission",
+        cascade="all, delete-orphan",
+        order_by="SubmissionBatch.created_at",
+    )
 
 
 class SubmissionRow(Base):
@@ -70,6 +75,7 @@ class SubmissionRow(Base):
         cascade="all, delete-orphan",
         order_by="SubmissionSelection.id",
     )
+    batch_items: Mapped[list[SubmissionBatchItem]] = relationship(back_populates="row")
 
 
 class TorobMatch(Base):
@@ -89,6 +95,7 @@ class TorobMatch(Base):
 
     row: Mapped[SubmissionRow] = relationship(back_populates="matches", foreign_keys=[row_id])
     selections: Mapped[list[SubmissionSelection]] = relationship(back_populates="match")
+    batch_items: Mapped[list[SubmissionBatchItem]] = relationship(back_populates="match")
 
 
 class SubmissionSelection(Base):
@@ -102,3 +109,43 @@ class SubmissionSelection(Base):
 
     row: Mapped[SubmissionRow] = relationship(back_populates="selections")
     match: Mapped[TorobMatch] = relationship(back_populates="selections")
+
+
+class SubmissionBatch(Base):
+    __tablename__ = "submission_batches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    submission_id: Mapped[int] = mapped_column(ForeignKey("submissions.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="pending", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    submission: Mapped[Submission] = relationship(back_populates="batches")
+    items: Mapped[list[SubmissionBatchItem]] = relationship(
+        back_populates="batch",
+        cascade="all, delete-orphan",
+        order_by="SubmissionBatchItem.id",
+    )
+
+    @property
+    def row_count(self) -> int:
+        return len({item.row_id for item in self.items})
+
+    @property
+    def selected_count(self) -> int:
+        return len(self.items)
+
+
+class SubmissionBatchItem(Base):
+    __tablename__ = "submission_batch_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("submission_batches.id"), nullable=False, index=True)
+    row_id: Mapped[int] = mapped_column(ForeignKey("submission_rows.id"), nullable=False, index=True)
+    match_id: Mapped[int] = mapped_column(ForeignKey("torob_matches.id"), nullable=False, index=True)
+    final_price: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    batch: Mapped[SubmissionBatch] = relationship(back_populates="items")
+    row: Mapped[SubmissionRow] = relationship(back_populates="batch_items")
+    match: Mapped[TorobMatch] = relationship(back_populates="batch_items")

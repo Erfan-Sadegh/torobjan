@@ -2,8 +2,8 @@ from io import BytesIO
 
 from openpyxl import Workbook, load_workbook
 
-from app.models import Submission, SubmissionRow, SubmissionSelection, TorobMatch
-from app.services.excel import build_export_xlsx, parse_products_xlsx
+from app.models import Submission, SubmissionBatch, SubmissionBatchItem, SubmissionRow, SubmissionSelection, TorobMatch
+from app.services.excel import build_batch_export_xlsx, build_export_xlsx, parse_products_xlsx
 
 
 def make_xlsx(headers: list[str], rows: list[list[object]]) -> bytes:
@@ -134,6 +134,31 @@ def test_build_export_xlsx_writes_multiple_selections_for_one_input_row() -> Non
     assert sheet["I3"].value == "second"
     assert sheet["L2"].value == "99000"
     assert sheet["L3"].value == "99000"
+
+
+def test_build_batch_export_xlsx_writes_only_batch_items() -> None:
+    submission = Submission(id=10, store_name="فروشگاه تست", shop_id="411147")
+    first_row = SubmissionRow(input_row=4, input_product_name="بالم لب", input_price="90000")
+    second_row = SubmissionRow(input_row=5, input_product_name="شامپو", input_price="120000")
+    first = TorobMatch(base_prk="first", name="بالم اول", price=80000, rank=0)
+    second = TorobMatch(base_prk="second", name="شامپو دوم", price=85000, rank=1)
+    batch = SubmissionBatch(id=3, submission=submission)
+    batch.items = [
+        SubmissionBatchItem(row=first_row, match=first, final_price="99000"),
+    ]
+    second_batch = SubmissionBatch(id=4, submission=submission)
+    second_batch.items = [
+        SubmissionBatchItem(row=second_row, match=second, final_price="130000"),
+    ]
+
+    content = build_batch_export_xlsx(submission, batch)
+    workbook = load_workbook(BytesIO(content))
+    sheet = workbook.active
+
+    assert sheet.max_row == 2
+    assert sheet["E2"].value == 4
+    assert sheet["I2"].value == "first"
+    assert sheet["L2"].value == "99000"
 
 
 def test_build_export_xlsx_skips_unselected_and_zero_price() -> None:

@@ -3,7 +3,7 @@ from logging.config import fileConfig
 from alembic import context
 
 from app.database import Base
-from app.models import Submission, SubmissionRow, SubmissionSelection, TorobMatch  # noqa: F401
+from app.models import Submission, SubmissionBatch, SubmissionBatchItem, SubmissionRow, SubmissionSelection, TorobMatch  # noqa: F401
 from app.settings import settings
 
 config = context.config

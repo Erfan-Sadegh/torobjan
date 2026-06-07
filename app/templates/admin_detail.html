@@ -36,6 +36,7 @@
         <thead>
           <tr>
             <th>زمان ثبت</th>
+            <th>وضعیت</th>
             <th>ردیف</th>
             <th>کالا</th>
             <th></th>
@@ -45,9 +46,10 @@
           {% for batch in batches %}
             <tr>
               <td class="ltr">{{ batch.created_at }}</td>
+              <td>{{ "آماده خروجی" if batch.status == "pending" else batch.status }}</td>
               <td>{{ batch.row_count }}</td>
               <td>{{ batch.selected_count }}</td>
-              <td><a href="/admin/submissions/{{ submission.id }}/export.xlsx?batch={{ batch.key }}">دانلود همین ثبت</a></td>
+              <td><a href="/admin/submissions/{{ submission.id }}/export.xlsx?batch={{ batch.id }}">دانلود همین ثبت</a></td>
             </tr>
           {% endfor %}
         </tbody>

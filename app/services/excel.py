@@ -9,7 +9,7 @@ from typing import Iterable
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 
-from app.models import Submission, SubmissionRow
+from app.models import Submission, SubmissionBatch, SubmissionRow
 
 MAX_ROWS = 500
 
@@ -218,6 +218,34 @@ def build_export_xlsx(submission: Submission, rows: Iterable[SubmissionRow]) -> 
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "torob_export"
+    _append_export_headers(sheet)
+
+    created_at = _format_datetime(submission.created_at)
+    for row in rows:
+        for selection in row.selections:
+            if _is_exportable_selection(selection.match, selection.final_price):
+                _append_export_row(sheet, submission, row, selection.match, selection.final_price, created_at)
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
+def build_batch_export_xlsx(submission: Submission, batch: SubmissionBatch) -> bytes:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "torob_export"
+    _append_export_headers(sheet)
+
+    created_at = _format_datetime(batch.created_at)
+    for item in batch.items:
+        if _is_exportable_selection(item.match, item.final_price):
+            _append_export_row(sheet, submission, item.row, item.match, item.final_price, created_at)
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
+def _append_export_headers(sheet) -> None:
     headers = [
         "submission_id",
         "store_name",
@@ -239,15 +267,6 @@ def build_export_xlsx(submission: Submission, rows: Iterable[SubmissionRow]) -> 
     for cell in sheet[1]:
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="D73948")
-
-    created_at = _format_datetime(submission.created_at)
-    for row in rows:
-        for selection in row.selections:
-            if _is_exportable_selection(selection.match, selection.final_price):
-                _append_export_row(sheet, submission, row, selection.match, selection.final_price, created_at)
-    output = BytesIO()
-    workbook.save(output)
-    return output.getvalue()
 
 
 def _is_exportable_selection(match, final_price: str | None) -> bool:
