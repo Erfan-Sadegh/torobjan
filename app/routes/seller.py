@@ -4,19 +4,21 @@ from pathlib import Path
 import re
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import SessionLocal, get_db
 from app.models import Submission, SubmissionRow, SubmissionSelection, TorobMatch
 from app.services.excel import ExcelParseError, build_template_xlsx, parse_price, parse_products_excel
-from app.services.torob import TorobClient, TorobClientError
+from app.services.product_search import ProductSearchClient, ProductSearchError
 from app.settings import settings
 from app.template_utils import create_templates
 
 router = APIRouter()
 templates = create_templates()
+INITIAL_MATCH_COUNT = 4
+MATCH_BATCH_PER_SOURCE = 2
 
 
 @router.get("/")
@@ -103,7 +105,7 @@ async def upload_products(
 
 async def process_submission_matches(submission_id: int) -> None:
     db = SessionLocal()
-    client = TorobClient()
+    client = ProductSearchClient()
     consecutive_torob_failures = 0
     successful_torob_searches = 0
     try:
@@ -111,8 +113,12 @@ async def process_submission_matches(submission_id: int) -> None:
         rows = [row for row in submission.rows if row.input_product_name and not row.error_message]
         for row in rows:
             try:
-                results = await client.search_base_products(row.input_product_name or "", size=5)
-            except TorobClientError as exc:
+                results = await client.search_products(
+                    row.input_product_name or "",
+                    page=0,
+                    per_source=MATCH_BATCH_PER_SOURCE,
+                )
+            except ProductSearchError as exc:
                 if successful_torob_searches == 0:
                     submission.status = "failed"
                     submission.error_message = _global_torob_error_message(exc)
@@ -130,23 +136,13 @@ async def process_submission_matches(submission_id: int) -> None:
             consecutive_torob_failures = 0
             successful_torob_searches += 1
             if not results:
-                row.error_message = "نتیجه‌ای در ترب پیدا نشد."
+                row.error_message = "نتیجه‌ای برای این محصول پیدا نشد."
+                row.has_more_matches = False
                 db.commit()
                 continue
-            for result in results:
-                db.add(
-                    TorobMatch(
-                        row_id=row.id,
-                        rank=result.rank,
-                        base_prk=result.base_prk,
-                        name=result.name,
-                        price=result.price,
-                        price_text=result.price_text,
-                        image_url=result.image_url,
-                        product_url=result.product_url,
-                        is_already_added=result.is_already_added,
-                    )
-                )
+            _append_matches(db, row, results)
+            row.has_more_matches = bool(results)
+            row.next_search_page = 1
             db.commit()
         submission.status = "ready"
         db.commit()
@@ -175,7 +171,34 @@ def _row_from_parsed(submission_id: int, parsed) -> SubmissionRow:
     )
 
 
-def _global_torob_error_message(exc: TorobClientError) -> str:
+def _append_matches(db: Session, row: SubmissionRow, results) -> int:
+    existing_keys = {(match.source, match.base_prk) for match in row.matches}
+    added_count = 0
+    next_rank = len(row.matches)
+    for result in results:
+        key = (result.source, result.base_prk)
+        if key in existing_keys:
+            continue
+        row.matches.append(
+            TorobMatch(
+                source=result.source,
+                rank=next_rank,
+                base_prk=result.base_prk,
+                name=result.name,
+                price=result.price,
+                price_text=result.price_text,
+                image_url=result.image_url,
+                product_url=result.product_url,
+                is_already_added=result.is_already_added,
+            )
+        )
+        existing_keys.add(key)
+        added_count += 1
+        next_rank += 1
+    return added_count
+
+
+def _global_torob_error_message(exc: ProductSearchError) -> str:
     if exc.code == "torob_forbidden":
         return _forbidden_torob_error_message()
     if exc.code == "torob_gateway_not_found":
@@ -199,7 +222,7 @@ def _global_torob_error_message(exc: TorobClientError) -> str:
     )
 
 
-def _should_pause_batch(exc: TorobClientError, consecutive_failures: int) -> bool:
+def _should_pause_batch(exc: ProductSearchError, consecutive_failures: int) -> bool:
     if exc.code in {
         "torob_forbidden",
         "torob_bot_challenge",
@@ -211,7 +234,7 @@ def _should_pause_batch(exc: TorobClientError, consecutive_failures: int) -> boo
     return consecutive_failures >= 3
 
 
-def _row_torob_error_message(exc: TorobClientError) -> str:
+def _row_torob_error_message(exc: ProductSearchError) -> str:
     if exc.code == "torob_gateway_not_found":
         return "مسیر gateway ترب پیدا نشد. کمی بعد تلاش مجدد بزن."
     if exc.code == "torob_rate_limited":
@@ -296,38 +319,68 @@ async def retry_row_search(request: Request, row_id: int, db: Session = Depends(
     row.error_message = None
     row.selected_match_id = None
     row.final_price = None
+    row.has_more_matches = True
+    row.next_search_page = 1
     db.commit()
     db.refresh(row)
 
-    client = TorobClient()
+    client = ProductSearchClient()
     try:
-        results = await client.search_base_products(row.input_product_name, size=5)
-    except TorobClientError as exc:
+        results = await client.search_products(row.input_product_name, page=0, per_source=MATCH_BATCH_PER_SOURCE)
+    except ProductSearchError as exc:
         row.error_message = exc.public_message
+        row.has_more_matches = False
         db.commit()
         return _render_row_card(request, row)
     finally:
         await client.close()
 
     if not results:
-        row.error_message = "نتیجه‌ای در ترب پیدا نشد."
+        row.error_message = "نتیجه‌ای برای این محصول پیدا نشد."
+        row.has_more_matches = False
         db.commit()
         return _render_row_card(request, row)
 
-    for result in results:
-        db.add(
-            TorobMatch(
-                row_id=row.id,
-                rank=result.rank,
-                base_prk=result.base_prk,
-                name=result.name,
-                price=result.price,
-                price_text=result.price_text,
-                image_url=result.image_url,
-                product_url=result.product_url,
-                is_already_added=result.is_already_added,
+    _append_matches(db, row, results)
+    row.has_more_matches = bool(results)
+    row.next_search_page = 1
+    db.commit()
+    db.refresh(row)
+    return _render_row_card(request, row)
+
+
+@router.post("/rows/{row_id}/more")
+async def load_more_row_matches(request: Request, row_id: int, db: Session = Depends(get_db)) -> Response:
+    row = _get_row(db, row_id)
+    if not row.input_product_name or row.error_message:
+        return _render_row_card(request, row)
+
+    client = ProductSearchClient()
+    added_count = 0
+    fetched_count = 0
+    page = row.next_search_page
+    try:
+        for _attempt in range(3):
+            results = await client.search_products(
+                row.input_product_name,
+                page=page,
+                per_source=MATCH_BATCH_PER_SOURCE,
             )
-        )
+            fetched_count = len(results)
+            row.next_search_page = page + 1
+            added_count += _append_matches(db, row, results)
+            page += 1
+            if added_count >= INITIAL_MATCH_COUNT or fetched_count == 0:
+                break
+    except ProductSearchError:
+        row.has_more_matches = False
+        db.commit()
+        return _render_row_card(request, row)
+    finally:
+        await client.close()
+
+    if added_count == 0 or fetched_count == 0:
+        row.has_more_matches = False
     db.commit()
     db.refresh(row)
     return _render_row_card(request, row)
@@ -350,6 +403,39 @@ async def confirm_submission(
 ) -> Response:
     form = await request.form()
     submission = _get_submission(db, submission_id)
+    finish_mode = str(form.get("finish_mode") or "complete")
+    selected_count = _save_submission_selections(form, submission, db)
+    submission.selected_rows = selected_count
+    submission.status = "ready" if finish_mode == "continue" else "submitted"
+    db.commit()
+    return templates.TemplateResponse(
+        request,
+        "success.html",
+        {"submission": submission, "finish_mode": finish_mode, "selected_count": selected_count},
+    )
+
+
+@router.post("/submissions/{submission_id}/draft")
+async def save_submission_draft(
+    request: Request,
+    submission_id: int,
+    db: Session = Depends(get_db),
+) -> Response:
+    form = await request.form()
+    submission = _get_submission(db, submission_id)
+    selected_count = _save_submission_selections(form, submission, db)
+    submission.selected_rows = selected_count
+    if submission.status == "submitted":
+        submission.status = "ready"
+    db.commit()
+    return JSONResponse({"ok": True, "selected_count": selected_count})
+
+
+def _save_submission_selections(form, submission: Submission, db: Session) -> int:
+    submitted_price_unit = str(form.get("price_unit") or "").strip()
+    if submitted_price_unit in {"toman", "rial"}:
+        submission.price_unit = submitted_price_unit
+    price_unit = submission.price_unit or "toman"
     selected_count = 0
     for row in submission.rows:
         if row.error_message:
@@ -357,8 +443,7 @@ async def confirm_submission(
         for selection in list(row.selections):
             db.delete(selection)
         selected_values = [str(value) for value in form.getlist(f"selected_{row.id}")]
-        raw_price_value = str(form.get(f"price_{row.id}") or "").strip()
-        price_value = parse_price(raw_price_value) or ""
+        price_value = _normalize_final_price(form.get(f"price_{row.id}"), price_unit)
         row.selected_match_id = None
         row.final_price = None
         if not selected_values or not price_value:
@@ -371,10 +456,22 @@ async def confirm_submission(
         selected_count += len(valid_matches)
         for match in valid_matches:
             db.add(SubmissionSelection(row_id=row.id, match_id=match.id, final_price=price_value))
-    submission.selected_rows = selected_count
-    submission.status = "submitted"
-    db.commit()
-    return templates.TemplateResponse(request, "success.html", {"submission": submission})
+    return selected_count
+
+
+def _normalize_final_price(value: object, price_unit: str) -> str | None:
+    parsed = parse_price(value)
+    if not parsed:
+        return None
+    digits = re.sub(r"\D+", "", parsed)
+    if not digits:
+        return None
+    amount = int(digits)
+    if amount <= 0:
+        return None
+    if price_unit == "rial":
+        amount = amount // 10
+    return str(amount) if amount > 0 else None
 
 
 def _render_match(request: Request, db: Session, submission_id: int) -> Response:
@@ -382,6 +479,7 @@ def _render_match(request: Request, db: Session, submission_id: int) -> Response
     parseable_rows = [row for row in submission.rows if row.input_product_name]
     valid_rows = [row for row in submission.rows if row.input_product_name and row.matches and not row.error_message]
     invalid_rows = [row for row in submission.rows if row.error_message]
+    price_unit_row_ids = {row.id for row in valid_rows[:3]}
     return templates.TemplateResponse(
         request,
         "match.html",
@@ -391,12 +489,22 @@ def _render_match(request: Request, db: Session, submission_id: int) -> Response
             "parseable_count": len(parseable_rows),
             "valid_count": len(valid_rows),
             "invalid_rows": invalid_rows,
+            "price_unit_row_ids": price_unit_row_ids,
+            "submission_price_unit": submission.price_unit,
         },
     )
 
 
 def _render_row_card(request: Request, row: SubmissionRow) -> Response:
-    return templates.TemplateResponse(request, "partials/row_card.html", {"row": row})
+    return templates.TemplateResponse(
+        request,
+        "partials/row_card.html",
+        {
+            "row": row,
+            "price_unit_row_ids": set(),
+            "submission_price_unit": row.submission.price_unit if row.submission else None,
+        },
+    )
 
 
 def _get_row(db: Session, row_id: int) -> SubmissionRow:

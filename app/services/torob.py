@@ -34,13 +34,13 @@ class TorobClient:
             await self._client.aclose()
             self._client = None
 
-    async def search_base_products(self, query: str, size: int = 5) -> list[TorobSearchResult]:
+    async def search_base_products(self, query: str, size: int = 5, page: int = 0) -> list[TorobSearchResult]:
         fetch_size = min(max(size * 3, 12), 24)
         params = {
             "sort": "popularity",
             "query": query,
             "q": query,
-            "page": 0,
+            "page": page,
             "size": fetch_size,
             "_search_landing": "search",
             "_landing_page": "home",

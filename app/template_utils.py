@@ -25,8 +25,19 @@ def price_input_value(value: object) -> str:
     return formatted
 
 
+def price_input_for_unit(value: object, unit: object = None) -> str:
+    formatted = price_input_value(value)
+    if not formatted or unit != "rial":
+        return formatted
+    digits = re.sub(r"\D+", "", formatted)
+    if not digits:
+        return formatted
+    return f"{int(digits) * 10:,}"
+
+
 def create_templates() -> Jinja2Templates:
     templates = Jinja2Templates(directory="app/templates")
     templates.env.filters["price"] = format_price
     templates.env.filters["price_input"] = price_input_value
+    templates.env.filters["price_input_for_unit"] = price_input_for_unit
     return templates

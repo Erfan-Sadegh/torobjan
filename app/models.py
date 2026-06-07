@@ -19,6 +19,7 @@ class Submission(Base):
     store_name: Mapped[str] = mapped_column(String(200), nullable=False)
     seller_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     shop_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    price_unit: Mapped[str | None] = mapped_column(String(16), nullable=True)
     original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     stored_file_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -49,6 +50,8 @@ class SubmissionRow(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     final_price: Mapped[str | None] = mapped_column(String(80), nullable=True)
     selected_match_id: Mapped[int | None] = mapped_column(ForeignKey("torob_matches.id"), nullable=True)
+    has_more_matches: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    next_search_page: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 
     submission: Mapped[Submission] = relationship(back_populates="rows")
     matches: Mapped[list[TorobMatch]] = relationship(
@@ -73,6 +76,7 @@ class TorobMatch(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     row_id: Mapped[int] = mapped_column(ForeignKey("submission_rows.id"), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(32), default="torob", nullable=False)
     rank: Mapped[int] = mapped_column(Integer, nullable=False)
     base_prk: Mapped[str] = mapped_column(String(120), nullable=False)
     name: Mapped[str] = mapped_column(String(500), nullable=False)

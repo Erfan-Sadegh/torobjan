@@ -10,7 +10,7 @@
     {% if row.error_message %}
       <span class="badge warn">بدون نتیجه</span>
     {% else %}
-      <span class="badge">انتخاب چندتایی</span>
+      <span class="badge choice-badge">امکان انتخاب چند کالا</span>
     {% endif %}
   </div>
 
@@ -27,10 +27,11 @@
       {% endif %}
     </div>
   {% else %}
+    {% set saved_selection_ids = row.selections | map(attribute="match_id") | list %}
     <div class="products">
       {% for match in row.matches %}
         <label class="product-option">
-          <input type="checkbox" name="selected_{{ row.id }}" value="{{ match.id }}">
+          <input type="checkbox" name="selected_{{ row.id }}" value="{{ match.id }}" {% if match.id in saved_selection_ids %}checked{% endif %}>
           <span class="product-card">
             <span class="select-mark" aria-hidden="true">
               <svg viewBox="0 0 24 24">
@@ -43,11 +44,11 @@
               {% set torob_price = match.price|price %}
               <span class="price-line">
                 {% if torob_price %}
-                  قیمت در ترب: {{ torob_price }} تومان
+                  قیمت {{ "باسلام" if match.source == "basalam" else "ترب" }}: {{ torob_price }} تومان
                 {% elif match.price_text %}
-                  قیمت در ترب: {{ match.price_text }}
+                  قیمت {{ "باسلام" if match.source == "basalam" else "ترب" }}: {{ match.price_text }}
                 {% else %}
-                  قیمت در ترب نامشخص است
+                  قیمت {{ "باسلام" if match.source == "basalam" else "ترب" }} نامشخص است
                 {% endif %}
               </span>
               {% if match.is_already_added %}
@@ -58,12 +59,32 @@
         </label>
       {% endfor %}
     </div>
+    {% if row.has_more_matches %}
+      <div class="load-more-row">
+        <button class="btn secondary load-more-btn"
+                type="button"
+                data-more-url="/rows/{{ row.id }}/more"
+                data-row-target="row-{{ row.id }}">
+          <span class="idle-label">بیشتر</span>
+          <span class="loading-label">در حال دریافت...</span>
+        </button>
+      </div>
+    {% endif %}
     <div class="row-actions">
       <div class="field">
         <label for="price_{{ row.id }}">قیمت نهایی تومان</label>
-        <input id="price_{{ row.id }}" name="price_{{ row.id }}" type="text" inputmode="numeric" value="{{ row.input_price|price_input }}" required>
-        <span class="hint">اگر چند محصول انتخاب کنی، همین قیمت برای همه‌شان در خروجی ثبت می‌شود.</span>
+        <input id="price_{{ row.id }}" name="price_{{ row.id }}" type="text" inputmode="numeric" value="{{ (row.final_price|price_input_for_unit(submission_price_unit)) if row.final_price else (row.input_price|price_input) }}">
+        <span class="hint">اگر چند محصول انتخاب کنی، همین قیمت برای همه‌شان ثبت می‌شود.</span>
       </div>
+      {% if price_unit_row_ids and row.id in price_unit_row_ids %}
+        <div class="price-unit-card" data-price-unit-card>
+          <div class="price-unit-title">قیمت‌ها ریال هست یا تومان؟</div>
+          <div class="price-unit-options">
+            <button class="unit-option" type="button" data-price-unit-option="toman">تومان</button>
+            <button class="unit-option" type="button" data-price-unit-option="rial">ریال</button>
+          </div>
+        </div>
+      {% endif %}
     </div>
   {% endif %}
 </article>

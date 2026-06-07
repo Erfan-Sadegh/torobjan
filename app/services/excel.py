@@ -29,7 +29,7 @@ PRODUCT_NAME_HEADERS = {
     "شرح کالا",
     "شرح محصول",
 }
-PRICE_HEADERS = {"price", "قیمت", "قیمت فروش", "قیمت تومان", "قیمت نهایی", "مبلغ", "فی"}
+PRICE_HEADERS = {"price", "قیمت", "قیمت فروش", "قیمت تومان", "قیمت نهایی", "مبلغ", "فی", "فی فروش"}
 BARCODE_HEADERS = {"barcode", "bar code", "bar_code", "کد کالا", "بارکد", "کد محصول", "شناسه کالا"}
 BRAND_HEADERS = {"brand", "برند", "نام برند", "مارک"}
 DESCRIPTION_HEADERS = {"description", "desc", "توضیحات", "شرح", "مشخصات"}
@@ -226,6 +226,7 @@ def build_export_xlsx(submission: Submission, rows: Iterable[SubmissionRow]) -> 
         "input_row",
         "input_product_name",
         "input_price",
+        "selected_source",
         "selected_base_prk",
         "selected_torob_name",
         "selected_torob_price",
@@ -241,15 +242,22 @@ def build_export_xlsx(submission: Submission, rows: Iterable[SubmissionRow]) -> 
 
     created_at = _format_datetime(submission.created_at)
     for row in rows:
-        exported = False
         for selection in row.selections:
-            _append_export_row(sheet, submission, row, selection.match, selection.final_price, created_at)
-            exported = True
-        if not exported:
-            _append_export_row(sheet, submission, row, row.selected_match, row.final_price, created_at)
+            if _is_exportable_selection(selection.match, selection.final_price):
+                _append_export_row(sheet, submission, row, selection.match, selection.final_price, created_at)
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()
+
+
+def _is_exportable_selection(match, final_price: str | None) -> bool:
+    if match is None or not final_price:
+        return False
+    normalized = parse_price(final_price)
+    if not normalized:
+        return False
+    digits = re.sub(r"\D+", "", normalized)
+    return bool(digits) and int(digits) > 0
 
 
 def _append_export_row(sheet, submission: Submission, row: SubmissionRow, match, final_price: str | None, created_at: str | None) -> None:
@@ -262,6 +270,7 @@ def _append_export_row(sheet, submission: Submission, row: SubmissionRow, match,
             row.input_row,
             row.input_product_name,
             row.input_price,
+            (match.source or "torob") if match else None,
             match.base_prk if match else None,
             match.name if match else None,
             match.price if match else None,

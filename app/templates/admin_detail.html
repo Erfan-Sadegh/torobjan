@@ -45,10 +45,10 @@
             <td>
               {% if row.selections %}
                 {% for selection in row.selections %}
-                  <div>{{ selection.match.name }}</div>
+                  <div>{{ selection.match.name }} <span class="hint">({{ selection.match.source or "torob" }})</span></div>
                 {% endfor %}
               {% elif row.selected_match %}
-                {{ row.selected_match.name }}
+                {{ row.selected_match.name }} <span class="hint">({{ row.selected_match.source or "torob" }})</span>
               {% else %}
                 -
               {% endif %}
@@ -56,10 +56,10 @@
             <td>
               {% if row.selections %}
                 {% for selection in row.selections %}
-                  <div>{{ selection.final_price or "-" }}</div>
+                  <div>{{ selection.final_price|price or "-" }}</div>
                 {% endfor %}
               {% else %}
-                {{ row.final_price or "-" }}
+                {{ row.final_price|price or "-" }}
               {% endif %}
             </td>
             <td>{{ row.error_message or "-" }}</td>
