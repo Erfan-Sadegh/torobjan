@@ -66,14 +66,16 @@ def submissions(request: Request, db: Session = Depends(get_db)) -> Response:
 def submission_detail(request: Request, submission_id: int, db: Session = Depends(get_db)) -> Response:
     _require_admin(request)
     submission = _get_submission(db, submission_id)
+    batches = _visible_batches(submission)
     return templates.TemplateResponse(
         request,
         "admin_detail.html",
         {
             "submission": submission,
             "rows": submission.rows,
-            "batches": _visible_batches(submission),
+            "batches": batches,
             "bulk_add_configured": bool(settings.torob_bulk_add_key),
+            "admin_send_summary": _admin_send_summary(submission, batches),
             "message": request.query_params.get("message"),
             "error": request.query_params.get("error"),
         },
@@ -219,6 +221,14 @@ def _torob_health_error_text(exc: TorobClientError) -> str:
 
 def _visible_batches(submission: Submission) -> list[SubmissionBatch]:
     return sorted([batch for batch in submission.batches if batch.items], key=lambda item: item.created_at, reverse=True)
+
+
+def _admin_send_summary(submission: Submission, batches: list[SubmissionBatch]) -> dict[str, int]:
+    return {
+        "batch_count": len(batches),
+        "pending_batch_count": len([batch for batch in batches if batch.status != "sent"]),
+        "selection_count": sum(len(row.selections) for row in submission.rows),
+    }
 
 
 def _get_batch(submission: Submission, batch_id: int) -> SubmissionBatch:

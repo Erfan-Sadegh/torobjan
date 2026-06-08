@@ -923,6 +923,12 @@ th {
   padding: 28px 0;
 }
 
+.admin-send-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
 @media (max-width: 720px) {
   .form-grid,
   .row-actions {

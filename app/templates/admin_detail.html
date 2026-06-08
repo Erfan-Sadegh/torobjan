@@ -32,6 +32,35 @@
     </div>
   </form>
 
+  <div class="panel admin-send-panel">
+    <div class="row-head">
+      <div>
+        <h2>ارسال محصولات به ترب</h2>
+        <div class="hint">
+          برای ارسال واقعی، باید محصولات توسط فروشنده ثبت شده باشند، Shop ID ذخیره شده باشد و کلید bulk در تنظیمات فعال باشد.
+        </div>
+      </div>
+      <span class="badge {{ 'ok' if admin_send_summary.pending_batch_count and bulk_add_configured and submission.shop_id else 'warn' }}">
+        {{ admin_send_summary.pending_batch_count }} ثبت آماده
+      </span>
+    </div>
+    {% if not batches %}
+      {% if admin_send_summary.selection_count %}
+        <div class="error">این submission انتخاب ذخیره‌شده دارد، ولی ثبت نهایی/batch برای ارسال ندارد. فروشنده باید از صفحه انتخاب روی ثبت نهایی بزند تا دکمه ارسال به ترب ساخته شود.</div>
+      {% else %}
+        <div class="error">برای این submission هنوز محصولی نهایی نشده است. وقتی فروشنده محصول‌ها را انتخاب و ثبت کند، اینجا دکمه ارسال به ترب نمایش داده می‌شود.</div>
+      {% endif %}
+    {% elif not bulk_add_configured %}
+      <div class="error">کلید ارسال ترب تنظیم نشده است. مقدار env با نام TOROB_BULK_ADD_KEY را در همروش ست کن و اپ را ری‌استارت کن.</div>
+    {% elif not submission.shop_id %}
+      <div class="error">اول Shop ID همین فروشگاه را در فرم بالا وارد کن و دکمه «ذخیره Shop ID» را بزن. بعد دکمه ارسال در جدول پایین نمایش داده می‌شود.</div>
+    {% elif admin_send_summary.pending_batch_count %}
+      <div class="success">همه چیز آماده است. از جدول «ثبت‌های مرحله‌ای» پایین، دکمه «ارسال به ترب» را برای ثبت مورد نظر بزن.</div>
+    {% else %}
+      <div class="success">همه ثبت‌های این submission قبلا به ترب ارسال شده‌اند.</div>
+    {% endif %}
+  </div>
+
   {% if batches %}
     <div class="panel" style="margin-top: 18px;">
       <div class="row-head">
