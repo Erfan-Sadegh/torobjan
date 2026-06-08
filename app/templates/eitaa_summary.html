@@ -6,6 +6,9 @@
 </section>
 <section class="shell">
   <div class="success">کد پیگیری: {{ submission.id }}</div>
+  {% if submission.error_message %}
+    <div class="error" style="margin-top: 12px;">{{ submission.error_message }}</div>
+  {% endif %}
   <div class="panel eitaa-summary">
     <div>
       <strong>{{ submission.total_rows }}</strong>

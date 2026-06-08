@@ -193,6 +193,7 @@ async def import_eitaa_products(
         seller_phone=(seller_phone or "").strip() or None,
         source="eitaa",
         source_ref=channel_id,
+        price_unit="toman",
         status="processing",
     )
     db.add(submission)
@@ -281,7 +282,6 @@ async def process_eitaa_submission(submission_id: int) -> None:
             db.commit()
             return
 
-        selected_items: list[tuple[int, int, str]] = []
         image_match_attempts = 0
         image_matching_blocked = False
         consecutive_torob_failures = 0
@@ -295,7 +295,6 @@ async def process_eitaa_submission(submission_id: int) -> None:
                 input_price=draft.price_toman,
                 description=draft.description,
                 source_message_id=draft.message_id,
-                final_price=draft.price_toman,
             )
             db.add(row)
             db.flush()
@@ -323,7 +322,7 @@ async def process_eitaa_submission(submission_id: int) -> None:
                 db.commit()
                 consecutive_torob_failures += 1
                 if _should_stop_eitaa_torob_search(exc, consecutive_torob_failures):
-                    torob_stop_message = _eitaa_torob_stop_message(exc, len(selected_items))
+                    torob_stop_message = _eitaa_torob_stop_message(exc, _count_submission_selections(db, submission.id))
                     break
                 continue
             consecutive_torob_failures = 0
@@ -342,45 +341,19 @@ async def process_eitaa_submission(submission_id: int) -> None:
             row.auto_match_score = int(score * 100)
             if not match_by_prk:
                 row.error_message = "محصول در ترب پیدا نشد."
-            elif not draft.price_toman:
-                row.error_message = None
-            elif selected_match is None:
-                row.error_message = "تطبیق مطمئن با محصول ترب پیدا نشد؛ این مورد برای ارسال خودکار آماده نشد."
-            else:
+            elif selected_match is not None and draft.price_toman:
                 row.selected_match_id = selected_match.id
                 row.final_price = draft.price_toman
-                row.submitted_at = utc_now()
                 db.add(SubmissionSelection(row_id=row.id, match_id=selected_match.id, final_price=draft.price_toman))
                 db.flush()
-                selected_items.append((row.id, selected_match.id, draft.price_toman))
+            elif selected_match is None and draft.price_toman:
+                row.error_message = None
             db.commit()
 
-        if selected_items:
-            now = utc_now()
-            batch = SubmissionBatch(
-                submission_id=submission.id,
-                status="pending",
-                created_at=now,
-                updated_at=now,
-            )
-            db.add(batch)
-            db.flush()
-            for row_id, match_id, price in selected_items:
-                db.add(
-                    SubmissionBatchItem(
-                        batch_id=batch.id,
-                        row_id=row_id,
-                        match_id=match_id,
-                        final_price=price,
-                        created_at=now,
-                    )
-                )
-        submission.selected_rows = len(selected_items)
         if torob_stop_message:
             submission.error_message = torob_stop_message
-            submission.status = "submitted" if selected_items else "failed"
-        else:
-            submission.status = "submitted" if selected_items else "ready"
+        submission.selected_rows = _count_submission_selections(db, submission.id)
+        submission.status = "ready"
         db.commit()
     except UniomClientError as exc:
         db.rollback()
@@ -619,8 +592,6 @@ def _forbidden_torob_error_message() -> str:
 @router.get("/submissions/{submission_id}/processing-status")
 def processing_status(request: Request, submission_id: int, db: Session = Depends(get_db)) -> Response:
     submission = _get_submission(db, submission_id)
-    if submission.source == "eitaa" and submission.status in {"ready", "submitted"}:
-        return Response(status_code=204, headers={"HX-Redirect": f"/submissions/{submission.id}/eitaa-summary"})
     if submission.status == "ready":
         return Response(status_code=204, headers={"HX-Redirect": f"/submissions/{submission.id}/match"})
     if submission.status == "failed":
@@ -815,6 +786,8 @@ async def confirm_submission(
     form = await request.form()
     submission = _get_submission(db, submission_id)
     finish_mode = str(form.get("finish_mode") or "complete")
+    if submission.source == "eitaa":
+        finish_mode = "complete"
     save_result = _save_submission_selections(form, submission, db, mark_submitted=True)
     selected_count = save_result.submitted_count
     submission.selected_rows = save_result.total_selected_count
@@ -955,6 +928,15 @@ def _render_match(request: Request, db: Session, submission_id: int) -> Response
             "submission_price_unit": submission.price_unit,
             "submitted_rows_count": len([row for row in submission.rows if row.submitted_at]),
         },
+    )
+
+
+def _count_submission_selections(db: Session, submission_id: int) -> int:
+    return (
+        db.query(SubmissionSelection)
+        .join(SubmissionRow, SubmissionSelection.row_id == SubmissionRow.id)
+        .filter(SubmissionRow.submission_id == submission_id)
+        .count()
     )
 
 

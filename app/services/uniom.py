@@ -92,8 +92,17 @@ class UniomClient:
         if not self.token:
             raise UniomClientError("uniom_not_configured", "توکن یونیوم تنظیم نشده است.")
         client = await self._get_client()
-        response = await client.get(f"{self.base_url}/file/bot{self.token}/{quote(file_path, safe='/')}")
-        response.raise_for_status()
+        try:
+            response = await client.get(f"{self.base_url}/file/bot{self.token}/{quote(file_path, safe='/')}")
+            if response.status_code in {429, 502, 503, 504}:
+                raise UniomClientError("uniom_file_unavailable", "عکس محصول از ایتا کامل دریافت نشد.")
+            response.raise_for_status()
+        except UniomClientError:
+            raise
+        except (httpx.TimeoutException, httpx.ConnectError) as exc:
+            raise UniomClientError("uniom_file_unavailable", "عکس محصول از ایتا کامل دریافت نشد.") from exc
+        except httpx.HTTPError as exc:
+            raise UniomClientError("uniom_file_unavailable", "عکس محصول از ایتا کامل دریافت نشد.") from exc
         return response.content
 
     async def _get_json(self, method: str, params: dict[str, object]) -> dict:

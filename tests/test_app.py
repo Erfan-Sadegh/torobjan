@@ -10,6 +10,7 @@ from app.main import create_app
 from app.models import Submission, SubmissionRow, SubmissionSelection, TorobMatch
 from app.services.product_search import ProductSearchError, ProductSearchResult
 from app.services.torob import TorobClientError, TorobSearchResult
+from app.services.uniom import UniomClientError
 
 
 def make_xlsx() -> bytes:
@@ -1095,7 +1096,7 @@ def test_admin_can_rebuild_batch_from_legacy_selections(monkeypatch, tmp_path) -
     assert sent_items[0].price == 100000
 
 
-def test_eitaa_import_auto_matches_and_creates_admin_batch(monkeypatch, tmp_path) -> None:
+def test_eitaa_import_auto_matches_and_waits_for_seller_preview(monkeypatch, tmp_path) -> None:
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
@@ -1136,7 +1137,8 @@ def test_eitaa_import_auto_matches_and_creates_admin_batch(monkeypatch, tmp_path
         assert submission is not None
         assert submission.source == "eitaa"
         assert submission.source_ref == "@regaal"
-        assert submission.status == "submitted"
+        assert submission.status == "ready"
+        assert submission.price_unit == "toman"
         assert submission.total_rows == 1
         assert submission.selected_rows == 1
         assert len(submission.rows) == 1
@@ -1144,21 +1146,46 @@ def test_eitaa_import_auto_matches_and_creates_admin_batch(monkeypatch, tmp_path
         assert row.input_product_name == "کتونی نایک وودو"
         assert row.input_price == "668000"
         assert row.final_price == "668000"
+        assert row.submitted_at is None
         assert row.source_image_path is not None
         assert row.selected_match.base_prk == "nike-voodoo"
         assert row.auto_match_score >= 72
-        assert len(submission.batches) == 1
-        assert submission.batches[0].selected_count == 1
+        assert len(row.selections) == 1
+        assert len(submission.batches) == 0
         submission_id = submission.id
+        row_id = row.id
+        match_id = row.matches[0].id
 
     status = client.get(f"/submissions/{submission_id}/processing-status")
     assert status.status_code == 204
-    assert status.headers["HX-Redirect"] == f"/submissions/{submission_id}/eitaa-summary"
+    assert status.headers["HX-Redirect"] == f"/submissions/{submission_id}/match"
 
-    summary = client.get(f"/submissions/{submission_id}/eitaa-summary")
-    assert summary.status_code == 200
-    assert "محصولات کانال دریافت شد" in summary.text
-    assert "محصول آماده ثبت در ترب شد" in summary.text
+    match_page = client.get(f"/submissions/{submission_id}/match")
+    assert match_page.status_code == 200
+    assert "بررسی نهایی محصولات کانال" in match_page.text
+    assert "کتونی نایک مدل وودو" in match_page.text
+    assert f'value="{match_id}" checked' in match_page.text
+    assert 'value="668,000"' in match_page.text
+    assert "قیمت‌ها ریال هست یا تومان؟" not in match_page.text
+    assert "تایید و آماده‌سازی" in match_page.text
+
+    confirm = client.post(
+        f"/submissions/{submission_id}/confirm",
+        data={
+            f"selected_{row_id}": str(match_id),
+            f"price_{row_id}": "670000",
+            "price_unit": "toman",
+        },
+    )
+    assert confirm.status_code == 200
+    assert "محصولات ثبت شد" in confirm.text
+    with TestingSessionLocal() as db:
+        submission = db.query(Submission).first()
+        assert submission.status == "submitted"
+        assert submission.rows[0].submitted_at is not None
+        assert submission.rows[0].final_price == "670000"
+        assert len(submission.batches) == 1
+        assert submission.batches[0].selected_count == 1
 
     login = client.post("/admin/login", data={"password": "secret"}, follow_redirects=False)
     assert login.status_code == 303
@@ -1173,6 +1200,52 @@ def test_eitaa_import_auto_matches_and_creates_admin_batch(monkeypatch, tmp_path
     assert "@regaal" in detail.text
     assert "ارسال به ترب" in detail.text
     assert "nike-voodoo" not in detail.text
+
+
+def test_eitaa_image_download_failure_does_not_fail_processing(monkeypatch, tmp_path) -> None:
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    class ImageFailUniomClient(FakeUniomClient):
+        async def download_file(self, file_path: str) -> bytes:
+            raise UniomClientError("uniom_file_unavailable", "عکس محصول از ایتا کامل دریافت نشد.")
+
+    db_path = tmp_path / "test.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(bind=engine)
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    monkeypatch.setattr("app.routes.seller.SessionLocal", TestingSessionLocal)
+    monkeypatch.setattr("app.routes.seller.UniomClient", ImageFailUniomClient)
+    monkeypatch.setattr("app.routes.seller.TorobClient", FakeEitaaTorobClient)
+    monkeypatch.setattr("app.routes.seller.settings.uniom_bot_token", "test-token")
+    monkeypatch.setattr("app.routes.seller.settings.upload_dir", str(tmp_path / "uploads"))
+
+    app = create_app()
+    app.dependency_overrides[get_db] = override_get_db
+    client = TestClient(app)
+
+    response = client.post(
+        "/eitaa/import",
+        data={"store_name": "فروشگاه ایتا", "seller_phone": "", "channel_id": "regaal"},
+    )
+    assert response.status_code == 200
+
+    with TestingSessionLocal() as db:
+        submission = db.query(Submission).first()
+        assert submission.status == "ready"
+        assert submission.error_message is None
+        row = submission.rows[0]
+        assert row.source_image_path is None
+        assert row.matches
+        assert row.selections
 
 
 def test_eitaa_processing_status_is_indeterminate_before_rows_are_known(tmp_path) -> None:

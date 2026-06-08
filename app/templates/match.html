@@ -1,32 +1,61 @@
 {% extends "base.html" %}
 {% block content %}
+{% set is_eitaa = submission.source == "eitaa" %}
 <section class="shell hero">
-  <h1>انتخاب محصولات فروشگاه {{ submission.store_name }}</h1>
-  {% if valid_count %}
-    <p>{{ valid_count }} ردیف قابل جستجو پیدا شد. برای هر ردیف، محصول درست را انتخاب کن و قیمت نهایی فروشگاهت را وارد کن.</p>
-  {% elif parseable_count %}
-    <p>{{ parseable_count }} ردیف از فایل خوانده شد، اما برای آن‌ها نتیجه قابل انتخاب از ترب ساخته نشد. پیام خطاهای هر ردیف را پایین می‌بینی.</p>
+  {% if is_eitaa %}
+    <h1>بررسی نهایی محصولات کانال {{ submission.store_name }}</h1>
+    {% if valid_count %}
+      <p>{{ valid_count }} محصول از کانال با ترب تطبیق داده شد. مواردی که تیک خورده‌اند آماده‌اند؛ هر کدام را نمی‌خواهی بردار و اگر لازم بود قیمت را ویرایش کن.</p>
+    {% elif parseable_count %}
+      <p>{{ parseable_count }} محصول از کانال خوانده شد، اما هنوز مورد قابل تایید از ترب ساخته نشد. پیام هر ردیف را پایین می‌بینی.</p>
+    {% else %}
+      <p>از پیام‌های اخیر کانال، محصول قابل پردازش پیدا نشد.</p>
+    {% endif %}
   {% else %}
-    <p>هیچ ردیف قابل جستجویی پیدا نشد. معمولا دلیلش این است که ستون نام محصول در فایل با عنوان قابل تشخیص ثبت نشده یا چند ردیف توضیحی بالای فایل ساختار جدول را نامشخص کرده است.</p>
+    <h1>انتخاب محصولات فروشگاه {{ submission.store_name }}</h1>
+    {% if valid_count %}
+      <p>{{ valid_count }} ردیف قابل جستجو پیدا شد. برای هر ردیف، محصول درست را انتخاب کن و قیمت نهایی فروشگاهت را وارد کن.</p>
+    {% elif parseable_count %}
+      <p>{{ parseable_count }} ردیف از فایل خوانده شد، اما برای آن‌ها نتیجه قابل انتخاب از ترب ساخته نشد. پیام خطاهای هر ردیف را پایین می‌بینی.</p>
+    {% else %}
+      <p>هیچ ردیف قابل جستجویی پیدا نشد. معمولا دلیلش این است که ستون نام محصول در فایل با عنوان قابل تشخیص ثبت نشده یا چند ردیف توضیحی بالای فایل ساختار جدول را نامشخص کرده است.</p>
+    {% endif %}
   {% endif %}
 </section>
 
 <section class="shell">
+  {% if submission.error_message %}
+    <div class="error">{{ submission.error_message }}</div>
+  {% endif %}
   {% if invalid_rows %}
     <div class="error">
-      {{ invalid_rows|length }} ردیف هنوز نتیجه قابل انتخاب ندارد. برای ردیف‌های مهم می‌تونی تلاش مجدد بزنی.
+      {% if is_eitaa %}
+        {{ invalid_rows|length }} محصول هنوز نتیجه قابل تایید ندارد. برای موارد مهم می‌تونی تلاش مجدد بزنی.
+      {% else %}
+        {{ invalid_rows|length }} ردیف هنوز نتیجه قابل انتخاب ندارد. برای ردیف‌های مهم می‌تونی تلاش مجدد بزنی.
+      {% endif %}
     </div>
   {% endif %}
 
   {% if parseable_count %}
-  <form id="match-form" action="/submissions/{{ submission.id }}/confirm" method="post" data-draft-url="/submissions/{{ submission.id }}/draft" data-submission-id="{{ submission.id }}">
+  <form id="match-form"
+        action="/submissions/{{ submission.id }}/confirm"
+        method="post"
+        data-draft-url="/submissions/{{ submission.id }}/draft"
+        data-submission-id="{{ submission.id }}"
+        data-source="{{ submission.source }}"
+        data-submit-label="{{ 'تایید و آماده‌سازی' if is_eitaa else 'ثبت' }}">
     <input type="hidden" name="price_unit" value="{{ submission.price_unit or '' }}" data-price-unit-value>
     <input type="hidden" name="finish_mode" value="complete" data-finish-mode>
     {% if valid_count %}
       <div class="selection-guide">
         <div class="progress-note">
           <span class="note-sticker" aria-hidden="true">☕</span>
-          <p>هر تعدادی که انتخاب کردی رو می‌تونی ثبت کنی و هر وقت فرصت داشتی ادامه بدی. انتخاب‌ها ذخیره می‌شود.</p>
+          {% if is_eitaa %}
+            <p>یک مرور کوتاه کافی است؛ محصولاتی که تیک دارند بعد از تایید برای ثبت در ترب آماده می‌شوند. قیمت‌ها به تومان ذخیره می‌شوند.</p>
+          {% else %}
+            <p>هر تعدادی که انتخاب کردی رو می‌تونی ثبت کنی و هر وقت فرصت داشتی ادامه بدی. انتخاب‌ها ذخیره می‌شود.</p>
+          {% endif %}
         </div>
       </div>
     {% endif %}
@@ -39,38 +68,43 @@
     <div class="sticky-submit">
       <div class="sticky-submit-meta">
         <strong data-selected-count>0</strong>
-        <span>انتخاب‌شده از {{ valid_count }} ردیف</span>
-        <small data-draft-state>انتخاب‌ها ذخیره می‌شود</small>
+        <span>{{ "آماده تایید از" if is_eitaa else "انتخاب‌شده از" }} {{ valid_count }} ردیف</span>
+        <small data-draft-state>{{ "قیمت‌ها به تومان ذخیره می‌شود" if is_eitaa else "انتخاب‌ها ذخیره می‌شود" }}</small>
       </div>
-      <button class="btn" type="submit" data-submit-button>ثبت 0 محصول انتخاب شده</button>
+      <button class="btn" type="submit" data-submit-button>{{ "تایید و آماده‌سازی" if is_eitaa else "ثبت" }} 0 محصول انتخاب شده</button>
     </div>
   </form>
-  <div class="modal-backdrop" data-confirm-modal hidden>
-    <div class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
-      <button class="modal-x" type="button" data-close-modal aria-label="بستن">×</button>
-      <h2 id="confirm-title">با باقی محصولات چه کار کنیم؟</h2>
-      <p>می‌تونی همین انتخاب‌ها رو ثبت کنی و بعدا ادامه بدی، یا اگر باقی محصولات موجود نیستند همین مرحله را نهایی کنی.</p>
-      <div class="modal-actions">
-        <button class="btn" type="button" data-submit-mode="continue">ثبت و ادامه بعدا</button>
-        <button class="btn secondary" type="button" data-submit-mode="complete">ثبت نهایی همین‌ها</button>
+  {% if not is_eitaa %}
+    <div class="modal-backdrop" data-confirm-modal hidden>
+      <div class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+        <button class="modal-x" type="button" data-close-modal aria-label="بستن">×</button>
+        <h2 id="confirm-title">با باقی محصولات چه کار کنیم؟</h2>
+        <p>می‌تونی همین انتخاب‌ها رو ثبت کنی و بعدا ادامه بدی، یا اگر باقی محصولات موجود نیستند همین مرحله را نهایی کنی.</p>
+        <div class="modal-actions">
+          <button class="btn" type="button" data-submit-mode="continue">ثبت و ادامه بعدا</button>
+          <button class="btn secondary" type="button" data-submit-mode="complete">ثبت نهایی همین‌ها</button>
+        </div>
       </div>
     </div>
-  </div>
-  <div class="modal-backdrop" data-rest-modal hidden>
-    <div class="confirm-modal rest-modal" role="dialog" aria-modal="true">
-      <button class="modal-x" type="button" data-close-rest-modal aria-label="بستن">×</button>
-      <div class="modal-sticker" aria-hidden="true">☕</div>
-      <h2>انتخاب‌هات ذخیره می‌شود</h2>
-      <p>می‌تونی همین‌هایی که تا الان انتخاب کردی رو اضافه کنی و باقی محصولات رو بین کارهای روزانه‌ات کم‌کم انجام بدی :)</p>
-      <div class="modal-actions">
-        <button class="btn" type="button" data-close-rest-modal>متوجه شدم</button>
+    <div class="modal-backdrop" data-rest-modal hidden>
+      <div class="confirm-modal rest-modal" role="dialog" aria-modal="true">
+        <button class="modal-x" type="button" data-close-rest-modal aria-label="بستن">×</button>
+        <div class="modal-sticker" aria-hidden="true">☕</div>
+        <h2>انتخاب‌هات ذخیره می‌شود</h2>
+        <p>می‌تونی همین‌هایی که تا الان انتخاب کردی رو اضافه کنی و باقی محصولات رو بین کارهای روزانه‌ات کم‌کم انجام بدی :)</p>
+        <div class="modal-actions">
+          <button class="btn" type="button" data-close-rest-modal>متوجه شدم</button>
+        </div>
       </div>
     </div>
-  </div>
+  {% endif %}
   {% endif %}
 </section>
 <script>
   const matchForm = document.querySelector("#match-form");
+  const submissionSource = matchForm ? matchForm.dataset.source : "";
+  const isEitaaSubmission = submissionSource === "eitaa";
+  const submitLabel = matchForm ? matchForm.dataset.submitLabel : "ثبت";
   const validRowCount = {{ valid_count or 0 }};
   const breakHintKey = matchForm ? `torobjan-break-hint:${matchForm.dataset.submissionId}` : "";
   let draftTimer = null;
@@ -88,7 +122,7 @@
     });
     const submitButton = document.querySelector("[data-submit-button]");
     if (submitButton) {
-      submitButton.textContent = `ثبت ${selectedCount} محصول انتخاب شده`;
+      submitButton.textContent = `${submitLabel} ${selectedCount} محصول انتخاب شده`;
     }
     document.querySelectorAll(".sticky-submit").forEach((item) => {
       item.classList.toggle("has-selection", selectedCount > 0);
@@ -106,6 +140,7 @@
   }
 
   function maybeShowBreakHint(selectedCount) {
+    if (isEitaaSubmission) return;
     const modal = document.querySelector("[data-rest-modal]");
     if (!modal || !breakHintKey || selectedCount < 50 || localStorage.getItem(breakHintKey)) return;
     localStorage.setItem(breakHintKey, "shown");
@@ -221,8 +256,9 @@
         return;
       }
       await saveDraft();
-      if (getSelectedRowCount() < validRowCount) {
-        document.querySelector("[data-confirm-modal]").hidden = false;
+      const confirmModal = document.querySelector("[data-confirm-modal]");
+      if (!isEitaaSubmission && getSelectedRowCount() < validRowCount && confirmModal) {
+        confirmModal.hidden = false;
         return;
       }
       submitWithMode("complete");
@@ -232,15 +268,17 @@
   document.addEventListener("click", (event) => {
     const modeButton = event.target.closest("[data-submit-mode]");
     if (modeButton) submitWithMode(modeButton.dataset.submitMode);
-    if (event.target.closest("[data-close-modal]")) {
-      document.querySelector("[data-confirm-modal]").hidden = true;
+    const confirmModal = document.querySelector("[data-confirm-modal]");
+    if (event.target.closest("[data-close-modal]") && confirmModal) {
+      confirmModal.hidden = true;
     }
     const backdrop = event.target.closest("[data-confirm-modal]");
     if (backdrop && event.target === backdrop) {
       backdrop.hidden = true;
     }
-    if (event.target.closest("[data-close-rest-modal]")) {
-      document.querySelector("[data-rest-modal]").hidden = true;
+    const restModal = document.querySelector("[data-rest-modal]");
+    if (event.target.closest("[data-close-rest-modal]") && restModal) {
+      restModal.hidden = true;
     }
     const restBackdrop = event.target.closest("[data-rest-modal]");
     if (restBackdrop && event.target === restBackdrop) {

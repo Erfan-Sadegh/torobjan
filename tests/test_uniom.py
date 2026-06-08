@@ -1,4 +1,5 @@
 import pytest
+import httpx
 
 from app.services.uniom import UniomClient, UniomClientError
 
@@ -44,3 +45,24 @@ async def test_uniom_history_pagination_reduces_page_size_on_errors(monkeypatch)
     assert len(messages) == 40
     assert calls[0] == ("@kosarmarket", 40, None)
     assert calls[1] == ("@kosarmarket", 20, None)
+
+
+@pytest.mark.asyncio
+async def test_uniom_download_file_maps_503_to_public_error(monkeypatch) -> None:
+    client = UniomClient()
+    client.token = "test-token"
+
+    class FakeClient:
+        async def get(self, *args, **kwargs):
+            return httpx.Response(503, request=httpx.Request("GET", "https://uniom.test/file"))
+
+    async def fake_get_client():
+        return FakeClient()
+
+    monkeypatch.setattr(client, "_get_client", fake_get_client)
+
+    with pytest.raises(UniomClientError) as exc:
+        await client.download_file("files/photo.jpg")
+
+    assert exc.value.code == "uniom_file_unavailable"
+    assert "https://uniom" not in exc.value.public_message
