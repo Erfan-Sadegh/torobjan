@@ -6,6 +6,12 @@
     <a href="/admin/submissions">بازگشت</a>
   </div>
   <form class="panel grid" action="/admin/submissions/{{ submission.id }}/shop-id" method="post">
+    {% if message %}
+      <div class="success">{{ message }}</div>
+    {% endif %}
+    {% if error %}
+      <div class="error">{{ error }}</div>
+    {% endif %}
     <div class="form-grid grid">
       <div class="field">
         <label>نام فروشگاه</label>
@@ -39,6 +45,7 @@
             <th>وضعیت</th>
             <th>ردیف</th>
             <th>کالا</th>
+            <th>ارسال ترب</th>
             <th></th>
           </tr>
         </thead>
@@ -49,6 +56,25 @@
               <td>{{ "آماده خروجی" if batch.status == "pending" else batch.status }}</td>
               <td>{{ batch.row_count }}</td>
               <td>{{ batch.selected_count }}</td>
+              <td>
+                {% if batch.status == "sent" %}
+                  <div>ارسال شد: {{ batch.torob_sent_count }}</div>
+                  {% if batch.torob_skipped_count %}
+                    <div class="hint">{{ batch.torob_skipped_count }} غیرتربی ارسال نشد</div>
+                  {% endif %}
+                {% elif not bulk_add_configured %}
+                  <span class="hint">کلید bulk تنظیم نشده</span>
+                {% elif not submission.shop_id %}
+                  <span class="hint">اول Shop ID را ذخیره کن</span>
+                {% else %}
+                  <form action="/admin/submissions/{{ submission.id }}/batches/{{ batch.id }}/send-torob" method="post" onsubmit="return confirm('این ثبت به فروشگاه ترب ارسال شود؟');">
+                    <button class="btn" type="submit">ارسال به ترب</button>
+                  </form>
+                  {% if batch.status == "failed" and batch.torob_error_message %}
+                    <div class="hint">{{ batch.torob_error_message }}</div>
+                  {% endif %}
+                {% endif %}
+              </td>
               <td><a href="/admin/submissions/{{ submission.id }}/export.xlsx?batch={{ batch.id }}">دانلود همین ثبت</a></td>
             </tr>
           {% endfor %}

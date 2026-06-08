@@ -117,6 +117,11 @@ class SubmissionBatch(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     submission_id: Mapped[int] = mapped_column(ForeignKey("submissions.id"), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(40), default="pending", nullable=False)
+    torob_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    torob_sent_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    torob_skipped_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    torob_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    torob_response_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 

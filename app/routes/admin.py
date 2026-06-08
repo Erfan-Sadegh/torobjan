@@ -7,8 +7,9 @@ from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
-from app.models import Submission, SubmissionBatch, SubmissionBatchItem, SubmissionRow, SubmissionSelection
+from app.models import Submission, SubmissionBatch, SubmissionBatchItem, SubmissionRow, SubmissionSelection, utc_now
 from app.services.excel import build_batch_export_xlsx, build_export_xlsx
+from app.services.torob_bulk import TorobBulkAddClient, TorobBulkAddError, TorobBulkAddItem
 from app.services.torob import TorobClient, TorobClientError
 from app.settings import settings
 from app.template_utils import create_templates
@@ -68,7 +69,14 @@ def submission_detail(request: Request, submission_id: int, db: Session = Depend
     return templates.TemplateResponse(
         request,
         "admin_detail.html",
-        {"submission": submission, "rows": submission.rows, "batches": _visible_batches(submission)},
+        {
+            "submission": submission,
+            "rows": submission.rows,
+            "batches": _visible_batches(submission),
+            "bulk_add_configured": bool(settings.torob_bulk_add_key),
+            "message": request.query_params.get("message"),
+            "error": request.query_params.get("error"),
+        },
     )
 
 
@@ -107,6 +115,61 @@ def export_submission(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}.xlsx"'},
     )
+
+
+@router.post("/submissions/{submission_id}/batches/{batch_id}/send-torob")
+async def send_batch_to_torob(
+    request: Request,
+    submission_id: int,
+    batch_id: int,
+    db: Session = Depends(get_db),
+) -> Response:
+    _require_admin(request)
+    submission = _get_submission(db, submission_id)
+    batch = _get_batch(submission, batch_id)
+    if batch.status == "sent":
+        return _admin_detail_redirect(submission.id, error="این ثبت قبلا به ترب ارسال شده است.")
+
+    shop_id = _parse_shop_id(submission.shop_id)
+    if shop_id is None:
+        return _admin_detail_redirect(submission.id, error="اول Shop ID عددی فروشگاه را ذخیره کن.")
+
+    torob_items, skipped_count = _torob_bulk_items(batch)
+    if not torob_items:
+        batch.status = "failed"
+        batch.torob_skipped_count = skipped_count
+        batch.torob_error_message = "این ثبت کالای انتخاب‌شده از ترب ندارد و مستقیم قابل ارسال نیست."
+        db.commit()
+        return _admin_detail_redirect(submission.id, error=batch.torob_error_message)
+
+    batch.status = "sending"
+    batch.torob_error_message = None
+    batch.torob_response_text = None
+    batch.torob_skipped_count = skipped_count
+    db.commit()
+
+    client = TorobBulkAddClient()
+    try:
+        result = await client.bulk_add(shop_id=shop_id, items=torob_items)
+    except TorobBulkAddError as exc:
+        batch.status = "failed"
+        batch.torob_error_message = _bulk_add_error_text(exc)
+        batch.torob_response_text = exc.response_text
+        db.commit()
+        return _admin_detail_redirect(submission.id, error=batch.torob_error_message)
+    finally:
+        await client.close()
+
+    batch.status = "sent"
+    batch.torob_sent_at = utc_now()
+    batch.torob_sent_count = result.sent_count
+    batch.torob_skipped_count = skipped_count
+    batch.torob_response_text = result.response_text
+    db.commit()
+    message = f"{result.sent_count} کالا به ترب ارسال شد."
+    if skipped_count:
+        message += f" {skipped_count} کالای غیرتربی ارسال نشد."
+    return _admin_detail_redirect(submission.id, message=message)
 
 
 @router.get("/torob-health")
@@ -163,6 +226,58 @@ def _get_batch(submission: Submission, batch_id: int) -> SubmissionBatch:
         if batch.id == batch_id:
             return batch
     raise HTTPException(status_code=404, detail="Batch not found")
+
+
+def _parse_shop_id(value: str | None) -> int | None:
+    if not value:
+        return None
+    text = value.strip()
+    if not text.isdigit():
+        return None
+    return int(text)
+
+
+def _torob_bulk_items(batch: SubmissionBatch) -> tuple[list[TorobBulkAddItem], int]:
+    items: list[TorobBulkAddItem] = []
+    skipped_count = 0
+    for item in batch.items:
+        if (item.match.source or "torob") != "torob":
+            skipped_count += 1
+            continue
+        price = _parse_positive_int(item.final_price)
+        if price is None:
+            skipped_count += 1
+            continue
+        items.append(TorobBulkAddItem(base_product_rk=item.match.base_prk, price=price))
+    return items, skipped_count
+
+
+def _parse_positive_int(value: object) -> int | None:
+    try:
+        amount = int(str(value or "").strip())
+    except ValueError:
+        return None
+    return amount if amount > 0 else None
+
+
+def _bulk_add_error_text(exc: TorobBulkAddError) -> str:
+    if exc.status_code:
+        return f"{exc.public_message} ({exc.status_code})"
+    return exc.public_message
+
+
+def _admin_detail_redirect(submission_id: int, message: str | None = None, error: str | None = None) -> Response:
+    params = []
+    if message:
+        params.append(("message", message))
+    if error:
+        params.append(("error", error))
+    query = ""
+    if params:
+        from urllib.parse import urlencode
+
+        query = "?" + urlencode(params)
+    return RedirectResponse(f"/admin/submissions/{submission_id}{query}", status_code=303)
 
 
 def _get_submission(db: Session, submission_id: int) -> Submission:

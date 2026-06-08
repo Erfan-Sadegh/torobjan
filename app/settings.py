@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     torob_timeout_seconds: float = Field(default=5, gt=0)
     torob_max_retries: int = Field(default=0, ge=0)
     torob_rate_limit_seconds: float = Field(default=0.25, ge=0)
+    torob_bulk_add_url: str = "https://api.torob.com/panel/offline-shop/product-in-store/searched/bulk-add/"
+    torob_bulk_add_key: str = ""
+    torob_bulk_add_timeout_seconds: float = Field(default=30, gt=0)
 
     def validate_for_runtime(self) -> None:
         if self.app_env != "production":

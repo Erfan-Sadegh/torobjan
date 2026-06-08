@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from io import BytesIO
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 from openpyxl import Workbook, load_workbook
@@ -222,6 +223,17 @@ class FakePagedProductSearchClient:
         return None
 
 
+class FakeTorobBulkAddClient:
+    calls = []
+
+    async def bulk_add(self, shop_id: int, items):
+        self.__class__.calls.append((shop_id, items))
+        return SimpleNamespace(sent_count=len(items), response_text='[{"ok": true}]')
+
+    async def close(self) -> None:
+        return None
+
+
 def test_upload_confirm_admin_export(monkeypatch, tmp_path) -> None:
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
@@ -243,6 +255,9 @@ def test_upload_confirm_admin_export(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.routes.seller.settings.upload_dir", str(tmp_path / "uploads"))
     monkeypatch.setattr("app.routes.admin.settings.admin_password", "secret")
     monkeypatch.setattr("app.routes.admin.settings.session_secret", "test-cookie")
+    monkeypatch.setattr("app.routes.admin.settings.torob_bulk_add_key", "bulk-test-key")
+    monkeypatch.setattr("app.routes.admin.TorobBulkAddClient", FakeTorobBulkAddClient)
+    FakeTorobBulkAddClient.calls = []
 
     app = create_app()
     app.dependency_overrides[get_db] = override_get_db
@@ -323,6 +338,29 @@ def test_upload_confirm_admin_export(monkeypatch, tmp_path) -> None:
     detail = client.get(f"/admin/submissions/{submission_id}")
     assert detail.status_code == 200
     assert "09121234567" in detail.text
+
+    with TestingSessionLocal() as db:
+        submission = db.query(Submission).first()
+        batch_id = submission.batches[0].id
+
+    send = client.post(
+        f"/admin/submissions/{submission_id}/batches/{batch_id}/send-torob",
+        follow_redirects=False,
+    )
+    assert send.status_code == 303
+    assert FakeTorobBulkAddClient.calls
+    sent_shop_id, sent_items = FakeTorobBulkAddClient.calls[0]
+    assert sent_shop_id == 411147
+    assert len(sent_items) == 1
+    assert sent_items[0].base_product_rk == "base-1"
+    assert sent_items[0].price == 170000
+
+    with TestingSessionLocal() as db:
+        submission = db.query(Submission).first()
+        batch = submission.batches[0]
+        assert batch.status == "sent"
+        assert batch.torob_sent_count == 1
+        assert batch.torob_skipped_count == 1
 
     listing = client.get("/admin/submissions")
     assert listing.status_code == 200
@@ -753,6 +791,9 @@ def test_continue_submission_hides_submitted_rows_and_shows_resume_card(monkeypa
     monkeypatch.setattr("app.routes.seller.utc_now", lambda: next(submitted_times))
     monkeypatch.setattr("app.routes.admin.settings.admin_password", "secret")
     monkeypatch.setattr("app.routes.admin.settings.session_secret", "test-cookie")
+    monkeypatch.setattr("app.routes.admin.settings.torob_bulk_add_key", "bulk-test-key")
+    monkeypatch.setattr("app.routes.admin.TorobBulkAddClient", FakeTorobBulkAddClient)
+    FakeTorobBulkAddClient.calls = []
 
     app = create_app()
     app.dependency_overrides[get_db] = override_get_db
@@ -834,6 +875,13 @@ def test_continue_submission_hides_submitted_rows_and_shows_resume_card(monkeypa
     login = client.post("/admin/login", data={"password": "secret"}, follow_redirects=False)
     assert login.status_code == 303
 
+    update_shop_id = client.post(
+        f"/admin/submissions/{submission_id}/shop-id",
+        data={"shop_id": "411147"},
+        follow_redirects=False,
+    )
+    assert update_shop_id.status_code == 303
+
     detail = client.get(f"/admin/submissions/{submission_id}")
     assert detail.status_code == 200
     assert "ثبت‌های مرحله‌ای" in detail.text
@@ -860,6 +908,27 @@ def test_continue_submission_hides_submitted_rows_and_shows_resume_card(monkeypa
     second_workbook = load_workbook(BytesIO(second_export.content))
     assert second_workbook.active.max_row == 2
     assert second_workbook.active["F2"].value == "بالم لب"
+
+    send = client.post(
+        f"/admin/submissions/{submission_id}/batches/{first_batch.id}/send-torob",
+        follow_redirects=False,
+    )
+    assert send.status_code == 303
+    assert FakeTorobBulkAddClient.calls
+    sent_shop_id, sent_items = FakeTorobBulkAddClient.calls[0]
+    assert sent_shop_id == 411147
+    assert sent_items[0].base_product_rk == "base-1"
+    assert sent_items[0].price == 170000
+
+    with TestingSessionLocal() as db:
+        submission = db.query(Submission).first()
+        sent_batch = [batch for batch in submission.batches if batch.id == first_batch.id][0]
+        assert sent_batch.status == "sent"
+        assert sent_batch.torob_sent_count == 1
+        assert sent_batch.torob_skipped_count == 0
+
+    detail_after_send = client.get(f"/admin/submissions/{submission_id}")
+    assert "ارسال شد: 1" in detail_after_send.text
 
 
 def test_index_has_loading_submit_state() -> None:
