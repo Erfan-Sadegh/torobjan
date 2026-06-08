@@ -252,6 +252,9 @@ class FakeUniomClient:
             },
         ]
 
+    async def get_chat_history_paginated(self, chat_id: str, total_limit: int, page_size: int) -> list[dict]:
+        return await self.get_chat_history(chat_id, total_limit)
+
     async def get_file(self, file_id: str):
         return SimpleNamespace(file_id=file_id, file_path="files/photo-large.jpg")
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import asyncio
 from urllib.parse import quote
 
 import httpx
@@ -38,6 +39,34 @@ class UniomClient:
         if not isinstance(result, list):
             raise UniomClientError("uniom_bad_response", "پاسخ تاریخچه کانال قابل پردازش نبود.")
         return [item for item in result if isinstance(item, dict)]
+
+    async def get_chat_history_paginated(self, chat_id: str, total_limit: int, page_size: int) -> list[dict]:
+        page_size = max(1, min(page_size, total_limit))
+        messages: list[dict] = []
+        seen_message_ids: set[object] = set()
+        offset_id: int | None = None
+        while len(messages) < total_limit:
+            current_limit = min(page_size, total_limit - len(messages))
+            page = await self.get_chat_history(chat_id, limit=current_limit, offset_id=offset_id)
+            new_page: list[dict] = []
+            for item in page:
+                message_id = item.get("message_id")
+                if message_id in seen_message_ids:
+                    continue
+                seen_message_ids.add(message_id)
+                new_page.append(item)
+            if not new_page:
+                break
+            messages.extend(new_page)
+            ids = [_to_int(item.get("message_id")) for item in new_page]
+            ids = [item for item in ids if item > 0]
+            if not ids:
+                break
+            offset_id = min(ids) - 1
+            if len(page) < current_limit:
+                break
+            await asyncio.sleep(0.2)
+        return messages[:total_limit]
 
     async def get_file(self, file_id: str) -> UniomFile:
         data = await self._get_json("getFile", {"file_id": file_id})
@@ -85,3 +114,10 @@ class UniomClientError(RuntimeError):
         super().__init__(public_message)
         self.code = code
         self.public_message = public_message
+
+
+def _to_int(value: object) -> int:
+    try:
+        return int(str(value or ""))
+    except ValueError:
+        return 0

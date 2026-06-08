@@ -263,7 +263,11 @@ async def process_eitaa_submission(submission_id: int) -> None:
         submission = _get_submission(db, submission_id)
         channel_id = submission.source_ref or ""
         await uniom.get_chat(channel_id)
-        messages = await uniom.get_chat_history(channel_id, limit=settings.eitaa_history_limit)
+        messages = await uniom.get_chat_history_paginated(
+            channel_id,
+            total_limit=settings.eitaa_history_limit,
+            page_size=settings.eitaa_history_page_size,
+        )
         drafts = extract_eitaa_products(messages, max_products=settings.eitaa_max_products)
         submission.total_rows = len(drafts)
         if not drafts:
