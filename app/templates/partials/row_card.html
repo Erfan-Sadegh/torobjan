@@ -2,10 +2,25 @@
 <article class="row-card" id="row-{{ row.id }}" {% if row.matches and not row.error_message %}data-selectable-row="true"{% endif %}>
   <div class="row-head">
     <div>
-      <div class="row-title">{{ "محصول کانال" if is_eitaa else "ردیف" }} {{ row.input_row }}: {{ row.input_product_name }}</div>
+      <div class="row-title">{{ "محصول " ~ row.input_row ~ " کانال" if is_eitaa else "ردیف " ~ row.input_row }}: {{ row.input_product_name }}</div>
       {% set file_price = row.input_price|price_input %}
       {% if file_price %}
         <div class="hint">قیمت {{ "کانال" if is_eitaa else "فایل" }}: {{ file_price }} تومان</div>
+      {% endif %}
+      {% if is_eitaa and not row.error_message %}
+        {% set needs_price = not row.final_price and not row.input_price %}
+        {% set needs_match = row.matches and not row.selections %}
+        {% if needs_price or needs_match %}
+          <div class="row-review-hint">
+            {% if needs_price and needs_match %}
+              قیمت از کانال تشخیص داده نشد و مچ مطمئن هم نبود؛ قیمت را وارد کن و محصول درست را تیک بزن.
+            {% elif needs_price %}
+              قیمت از کانال تشخیص داده نشد؛ قیمت را وارد کن.
+            {% else %}
+              مچ مطمئن نبود؛ اگر محصول درست است تیک بزن.
+            {% endif %}
+          </div>
+        {% endif %}
       {% endif %}
     </div>
     {% if row.error_message %}
@@ -31,9 +46,14 @@
     </div>
   {% else %}
     {% set saved_selection_ids = row.selections | map(attribute="match_id") | list %}
+    {% set hidden_extra = namespace(count=0) %}
     <div class="products">
       {% for match in row.matches %}
-        <label class="product-option">
+        {% set hide_match = is_eitaa and loop.index > 4 and match.id not in saved_selection_ids %}
+        {% if hide_match %}
+          {% set hidden_extra.count = hidden_extra.count + 1 %}
+        {% endif %}
+        <label class="product-option" {% if hide_match %}hidden data-extra-match{% endif %}>
           <input type="checkbox" name="selected_{{ row.id }}" value="{{ match.id }}" {% if match.id in saved_selection_ids %}checked{% endif %}>
           <span class="product-card">
             <span class="select-mark" aria-hidden="true">
@@ -62,7 +82,15 @@
         </label>
       {% endfor %}
     </div>
-    {% if row.has_more_matches %}
+    {% if is_eitaa and hidden_extra.count > 0 %}
+      <div class="load-more-row">
+        <button class="btn secondary reveal-more-btn"
+                type="button"
+                data-row-target="row-{{ row.id }}">
+          بیشتر
+        </button>
+      </div>
+    {% elif row.has_more_matches %}
       <div class="load-more-row">
         <button class="btn secondary load-more-btn"
                 type="button"

@@ -657,6 +657,54 @@ input[type="file"] {
   line-height: 1.8;
 }
 
+.match-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.match-summary div {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.match-summary strong {
+  color: var(--torob);
+}
+
+.match-section {
+  margin-top: 18px;
+}
+
+.match-section-head {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.match-section-head h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.6;
+}
+
+.match-section-head p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.8;
+}
+
 .row-card {
   margin: 18px 0;
   padding: 16px;
@@ -715,6 +763,13 @@ input[type="file"] {
 .row-title {
   font-weight: 800;
   overflow-wrap: anywhere;
+}
+
+.row-review-hint {
+  margin-top: 6px;
+  color: #9f5b00;
+  font-size: 12px;
+  line-height: 1.7;
 }
 
 .badge {

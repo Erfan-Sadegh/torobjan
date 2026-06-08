@@ -28,6 +28,7 @@ class TorobClient:
         self.max_retries = settings.torob_max_retries
         self.rate_limit_seconds = settings.torob_rate_limit_seconds
         self._client: httpx.AsyncClient | None = None
+        self._client_lock = asyncio.Lock()
 
     async def close(self) -> None:
         if self._client is not None:
@@ -181,7 +182,9 @@ class TorobClient:
 
     async def _get_client(self, headers: dict[str, str]) -> httpx.AsyncClient:
         if self._client is None:
-            self._client = httpx.AsyncClient(timeout=self.timeout, trust_env=False)
+            async with self._client_lock:
+                if self._client is None:
+                    self._client = httpx.AsyncClient(timeout=self.timeout, trust_env=False)
         return self._client
 
 

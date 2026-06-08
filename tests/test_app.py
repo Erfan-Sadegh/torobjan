@@ -1386,6 +1386,132 @@ def test_eitaa_import_keeps_no_price_products_for_seller_review(monkeypatch, tmp
         assert len(submission.batches) == 1
 
 
+def test_eitaa_preview_groups_review_rows_and_supports_continue(monkeypatch, tmp_path) -> None:
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    db_path = tmp_path / "test.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(bind=engine)
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app = create_app()
+    app.dependency_overrides[get_db] = override_get_db
+    client = TestClient(app)
+
+    with TestingSessionLocal() as db:
+        submission = Submission(
+            store_name="فروشگاه ایتا",
+            source="eitaa",
+            source_ref="@kosarmarket",
+            status="ready",
+            price_unit="toman",
+            total_rows=2,
+            selected_rows=1,
+        )
+        db.add(submission)
+        db.commit()
+        db.refresh(submission)
+        ready_row = SubmissionRow(
+            submission_id=submission.id,
+            input_row=1,
+            input_product_name="روغن جامد لادن",
+            input_price="330000",
+            final_price="330000",
+        )
+        review_row = SubmissionRow(
+            submission_id=submission.id,
+            input_row=2,
+            input_product_name="تخم مرغ شانه ۳۰ عددی",
+            input_price=None,
+            final_price=None,
+        )
+        db.add_all([ready_row, review_row])
+        db.commit()
+        db.refresh(ready_row)
+        db.refresh(review_row)
+        ready_matches = [
+            TorobMatch(
+                row_id=ready_row.id,
+                source="torob",
+                rank=index,
+                base_prk=f"oil-{index}",
+                name=f"روغن پیشنهادی {index}",
+                price=330000 + index,
+                image_url=None,
+                product_url=None,
+                is_already_added=False,
+            )
+            for index in range(6)
+        ]
+        review_match = TorobMatch(
+            row_id=review_row.id,
+            source="torob",
+            rank=0,
+            base_prk="egg-1",
+            name="تخم مرغ شانه ۳۰ عددی",
+            price=400000,
+            image_url=None,
+            product_url=None,
+            is_already_added=False,
+        )
+        db.add_all(ready_matches + [review_match])
+        db.commit()
+        db.refresh(ready_matches[0])
+        ready_row.selected_match_id = ready_matches[0].id
+        db.add(SubmissionSelection(row_id=ready_row.id, match_id=ready_matches[0].id, final_price="330000"))
+        db.commit()
+        submission_id = submission.id
+        ready_row_id = ready_row.id
+        ready_match_id = ready_matches[0].id
+
+    match_page = client.get(f"/submissions/{submission_id}/match")
+    assert match_page.status_code == 200
+    assert "1 محصول آماده تایید است و 1 محصول نیاز به بررسی دارد" in match_page.text
+    assert "نیازمند بررسی" in match_page.text
+    assert "آماده تایید" in match_page.text
+    assert "محصول 1 کانال" in match_page.text
+    assert "محصول کانال 1" not in match_page.text
+    assert "قیمت از کانال تشخیص داده نشد" in match_page.text
+    assert "reveal-more-btn" in match_page.text
+    assert match_page.text.count("hidden data-extra-match") == 2
+    assert "ذخیره همین‌ها و ادامه بعدا" in match_page.text
+
+    confirm = client.post(
+        f"/submissions/{submission_id}/confirm",
+        data={
+            f"selected_{ready_row_id}": str(ready_match_id),
+            f"price_{ready_row_id}": "330000",
+            "price_unit": "toman",
+            "finish_mode": "continue",
+        },
+    )
+    assert confirm.status_code == 200
+    assert "1 کالا ثبت شد" in confirm.text
+
+    with TestingSessionLocal() as db:
+        submission = db.query(Submission).first()
+        assert submission.status == "ready"
+        assert submission.rows[0].submitted_at is not None
+        assert submission.rows[1].submitted_at is None
+        assert len(submission.batches) == 1
+
+    remaining = client.get(f"/submissions/{submission_id}/match")
+    assert "روغن جامد لادن" not in remaining.text
+    assert "تخم مرغ شانه ۳۰ عددی" in remaining.text
+
+    eitaa_page = client.get("/eitaa")
+    assert "بررسی محصولات فروشگاه ایتا ناتمام مانده" in eitaa_page.text
+    assert "1 محصول هنوز مانده" in eitaa_page.text
+
+
 def test_index_has_loading_submit_state() -> None:
     app = create_app()
     client = TestClient(app)

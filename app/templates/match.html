@@ -4,10 +4,8 @@
 <section class="shell hero">
   {% if is_eitaa %}
     <h1>بررسی نهایی محصولات کانال {{ submission.store_name }}</h1>
-    {% if valid_count %}
-      <p>{{ valid_count }} محصول از کانال با ترب تطبیق داده شد. مواردی که تیک خورده‌اند آماده‌اند؛ هر کدام را نمی‌خواهی بردار و اگر لازم بود قیمت را ویرایش کن.</p>
-    {% elif parseable_count %}
-      <p>{{ parseable_count }} محصول از کانال خوانده شد، اما هنوز مورد قابل تایید از ترب ساخته نشد. پیام هر ردیف را پایین می‌بینی.</p>
+    {% if parseable_count %}
+      <p>{{ eitaa_ready_count }} محصول آماده تایید است و {{ eitaa_review_count }} محصول نیاز به بررسی دارد. هر مورد آماده را نمی‌خواهی بردار و قیمت‌ها را اگر لازم بود اصلاح کن.</p>
     {% else %}
       <p>از پیام‌های اخیر کانال، محصول قابل پردازش پیدا نشد.</p>
     {% endif %}
@@ -27,17 +25,25 @@
   {% if submission.error_message %}
     <div class="error">{{ submission.error_message }}</div>
   {% endif %}
-  {% if invalid_rows %}
+  {% if invalid_rows and not is_eitaa %}
     <div class="error">
-      {% if is_eitaa %}
-        {{ invalid_rows|length }} محصول هنوز نتیجه قابل تایید ندارد. برای موارد مهم می‌تونی تلاش مجدد بزنی.
-      {% else %}
-        {{ invalid_rows|length }} ردیف هنوز نتیجه قابل انتخاب ندارد. برای ردیف‌های مهم می‌تونی تلاش مجدد بزنی.
-      {% endif %}
+      {{ invalid_rows|length }} ردیف هنوز نتیجه قابل انتخاب ندارد. برای ردیف‌های مهم می‌تونی تلاش مجدد بزنی.
     </div>
   {% endif %}
 
   {% if parseable_count %}
+  {% if is_eitaa %}
+    <div class="match-summary">
+      <div>
+        <strong>{{ eitaa_ready_count }}</strong>
+        <span>آماده تایید</span>
+      </div>
+      <div>
+        <strong>{{ eitaa_review_count }}</strong>
+        <span>نیازمند بررسی</span>
+      </div>
+    </div>
+  {% endif %}
   <form id="match-form"
         action="/submissions/{{ submission.id }}/confirm"
         method="post"
@@ -52,7 +58,7 @@
         <div class="progress-note">
           <span class="note-sticker" aria-hidden="true">☕</span>
           {% if is_eitaa %}
-            <p>یک مرور کوتاه کافی است؛ محصولاتی که تیک دارند بعد از تایید برای ثبت در ترب آماده می‌شوند. قیمت‌ها به تومان ذخیره می‌شوند.</p>
+            <p>اول موارد نیازمند بررسی را کامل کن؛ اگر قیمت پیدا نشده واردش کن، اگر مچ مطمئن نبوده محصول درست را تیک بزن. انتخاب‌ها ذخیره می‌شوند.</p>
           {% else %}
             <p>هر تعدادی که انتخاب کردی رو می‌تونی ثبت کنی و هر وقت فرصت داشتی ادامه بدی. انتخاب‌ها ذخیره می‌شود.</p>
           {% endif %}
@@ -60,44 +66,89 @@
       </div>
     {% endif %}
   {% endif %}
-    {% for row in rows %}
-      {% include "partials/row_card.html" %}
-    {% endfor %}
+    {% if is_eitaa %}
+      {% if eitaa_review_rows %}
+        <div class="match-section">
+          <div class="match-section-head">
+            <h2>نیازمند بررسی</h2>
+            <p>
+              {% if eitaa_missing_price_count and eitaa_needs_match_count %}
+                بعضی محصولات قیمت ندارند و بعضی مچ مطمئن نداشتند.
+              {% elif eitaa_missing_price_count %}
+                این موارد قیمت قابل تشخیص نداشتند؛ قیمت را وارد کن و محصول درست را تیک بزن.
+              {% elif eitaa_needs_match_count %}
+                برای این موارد مچ مطمئن نبود؛ اگر محصول درست است تیک بزن.
+              {% else %}
+                این موارد هنوز آماده تایید نیستند؛ پیام هر ردیف را ببین.
+              {% endif %}
+            </p>
+          </div>
+          {% for row in eitaa_review_rows %}
+            {% include "partials/row_card.html" %}
+          {% endfor %}
+        </div>
+      {% endif %}
+      {% if eitaa_ready_rows %}
+        <div class="match-section">
+          <div class="match-section-head">
+            <h2>آماده تایید</h2>
+            <p>این محصولات با اطمینان بالاتر آماده شده‌اند. فقط اگر موردی اشتباه است تیکش را بردار یا قیمتش را اصلاح کن.</p>
+          </div>
+          {% for row in eitaa_ready_rows %}
+            {% include "partials/row_card.html" %}
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% else %}
+      {% for row in rows %}
+        {% include "partials/row_card.html" %}
+      {% endfor %}
+    {% endif %}
 
   {% if parseable_count %}
     <div class="sticky-submit">
       <div class="sticky-submit-meta">
         <strong data-selected-count>0</strong>
-        <span>{{ "آماده تایید از" if is_eitaa else "انتخاب‌شده از" }} {{ valid_count }} ردیف</span>
-        <small data-draft-state>{{ "قیمت‌ها به تومان ذخیره می‌شود" if is_eitaa else "انتخاب‌ها ذخیره می‌شود" }}</small>
+        <span>انتخاب‌شده از {{ parseable_count if is_eitaa else valid_count }} ردیف</span>
+        <small data-draft-state>انتخاب‌ها ذخیره می‌شود</small>
       </div>
       <button class="btn" type="submit" data-submit-button>{{ "تایید و آماده‌سازی" if is_eitaa else "ثبت" }} 0 محصول انتخاب شده</button>
     </div>
   </form>
-  {% if not is_eitaa %}
-    <div class="modal-backdrop" data-confirm-modal hidden>
-      <div class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
-        <button class="modal-x" type="button" data-close-modal aria-label="بستن">×</button>
-        <h2 id="confirm-title">با باقی محصولات چه کار کنیم؟</h2>
-        <p>می‌تونی همین انتخاب‌ها رو ثبت کنی و بعدا ادامه بدی، یا اگر باقی محصولات موجود نیستند همین مرحله را نهایی کنی.</p>
-        <div class="modal-actions">
-          <button class="btn" type="button" data-submit-mode="continue">ثبت و ادامه بعدا</button>
-          <button class="btn secondary" type="button" data-submit-mode="complete">ثبت نهایی همین‌ها</button>
-        </div>
+  <div class="modal-backdrop" data-confirm-modal hidden>
+    <div class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+      <button class="modal-x" type="button" data-close-modal aria-label="بستن">×</button>
+      <h2 id="confirm-title">{{ "باقی محصولات را بعدا بررسی می‌کنی؟" if is_eitaa else "با باقی محصولات چه کار کنیم؟" }}</h2>
+      <p>
+        {% if is_eitaa %}
+          می‌تونی همین انتخاب‌ها را آماده کنی و محصولات بدون تیک را بعدا بررسی کنی؛ یا اگر باقی موارد را نمی‌خواهی، همین مرحله را نهایی کن.
+        {% else %}
+          می‌تونی همین انتخاب‌ها رو ثبت کنی و بعدا ادامه بدی، یا اگر باقی محصولات موجود نیستند همین مرحله را نهایی کنی.
+        {% endif %}
+      </p>
+      <div class="modal-actions">
+        <button class="btn" type="button" data-submit-mode="continue">{{ "ذخیره همین‌ها و ادامه بعدا" if is_eitaa else "ثبت و ادامه بعدا" }}</button>
+        <button class="btn secondary" type="button" data-submit-mode="complete">{{ "نهایی کردن همین‌ها" if is_eitaa else "ثبت نهایی همین‌ها" }}</button>
       </div>
     </div>
-    <div class="modal-backdrop" data-rest-modal hidden>
-      <div class="confirm-modal rest-modal" role="dialog" aria-modal="true">
-        <button class="modal-x" type="button" data-close-rest-modal aria-label="بستن">×</button>
-        <div class="modal-sticker" aria-hidden="true">☕</div>
-        <h2>انتخاب‌هات ذخیره می‌شود</h2>
-        <p>می‌تونی همین‌هایی که تا الان انتخاب کردی رو اضافه کنی و باقی محصولات رو بین کارهای روزانه‌ات کم‌کم انجام بدی :)</p>
-        <div class="modal-actions">
-          <button class="btn" type="button" data-close-rest-modal>متوجه شدم</button>
-        </div>
+  </div>
+  <div class="modal-backdrop" data-rest-modal hidden>
+    <div class="confirm-modal rest-modal" role="dialog" aria-modal="true">
+      <button class="modal-x" type="button" data-close-rest-modal aria-label="بستن">×</button>
+      <div class="modal-sticker" aria-hidden="true">☕</div>
+      <h2>انتخاب‌هات ذخیره می‌شود</h2>
+      <p>
+        {% if is_eitaa %}
+          لازم نیست همه محصولات کانال را یک‌باره تمام کنی؛ همین‌هایی که آماده‌اند را ذخیره کن و باقی را بین کارهای روزانه‌ات کم‌کم بررسی کن :)
+        {% else %}
+          می‌تونی همین‌هایی که تا الان انتخاب کردی رو اضافه کنی و باقی محصولات رو بین کارهای روزانه‌ات کم‌کم انجام بدی :)
+        {% endif %}
+      </p>
+      <div class="modal-actions">
+        <button class="btn" type="button" data-close-rest-modal>متوجه شدم</button>
       </div>
     </div>
-  {% endif %}
+  </div>
   {% endif %}
 </section>
 <script>
@@ -105,7 +156,7 @@
   const submissionSource = matchForm ? matchForm.dataset.source : "";
   const isEitaaSubmission = submissionSource === "eitaa";
   const submitLabel = matchForm ? matchForm.dataset.submitLabel : "ثبت";
-  const validRowCount = {{ valid_count or 0 }};
+  const validRowCount = {{ (parseable_count if is_eitaa else valid_count) or 0 }};
   const breakHintKey = matchForm ? `torobjan-break-hint:${matchForm.dataset.submissionId}` : "";
   let draftTimer = null;
   let draftController = null;
@@ -140,7 +191,6 @@
   }
 
   function maybeShowBreakHint(selectedCount) {
-    if (isEitaaSubmission) return;
     const modal = document.querySelector("[data-rest-modal]");
     if (!modal || !breakHintKey || selectedCount < 50 || localStorage.getItem(breakHintKey)) return;
     localStorage.setItem(breakHintKey, "shown");
@@ -222,6 +272,20 @@
   });
 
   document.addEventListener("click", (event) => {
+    const button = event.target.closest(".reveal-more-btn");
+    if (!button) return;
+    const target = document.getElementById(button.dataset.rowTarget);
+    if (!target) return;
+    const hiddenItems = Array.from(target.querySelectorAll("[data-extra-match][hidden]"));
+    hiddenItems.slice(0, 4).forEach((item) => {
+      item.hidden = false;
+    });
+    if (target.querySelectorAll("[data-extra-match][hidden]").length === 0) {
+      button.closest(".load-more-row")?.remove();
+    }
+  });
+
+  document.addEventListener("click", (event) => {
     const option = event.target.closest("[data-price-unit-option]");
     if (!option) return;
     const input = document.querySelector("[data-price-unit-value]");
@@ -257,7 +321,7 @@
       }
       await saveDraft();
       const confirmModal = document.querySelector("[data-confirm-modal]");
-      if (!isEitaaSubmission && getSelectedRowCount() < validRowCount && confirmModal) {
+      if (getSelectedRowCount() < validRowCount && confirmModal) {
         confirmModal.hidden = false;
         return;
       }

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 import re
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
+from sqlalchemy import or_
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, selectinload
 
@@ -33,6 +35,13 @@ class SelectionSaveResult:
     batch_id: int | None = None
 
 
+@dataclass(frozen=True)
+class EitaaImageSearchOutcome:
+    results: list[TorobSearchResult]
+    attempted: bool = False
+    error: TorobClientError | None = None
+
+
 @router.get("/")
 def index(request: Request) -> Response:
     return templates.TemplateResponse(request, "index.html")
@@ -40,7 +49,7 @@ def index(request: Request) -> Response:
 
 @router.get("/excel")
 def excel_page(request: Request, db: Session = Depends(get_db)) -> Response:
-    draft_submission, draft_remaining_count = _get_resume_state(db, request.cookies.get(SELLER_DRAFT_COOKIE))
+    draft_submission, draft_remaining_count = _get_resume_state(db, request.cookies.get(SELLER_DRAFT_COOKIE), source="excel")
     return templates.TemplateResponse(
         request,
         "excel.html",
@@ -61,8 +70,16 @@ def template_xlsx() -> Response:
 
 
 @router.get("/eitaa")
-def eitaa_page(request: Request) -> Response:
-    return templates.TemplateResponse(request, "eitaa.html")
+def eitaa_page(request: Request, db: Session = Depends(get_db)) -> Response:
+    draft_submission, draft_remaining_count = _get_resume_state(db, request.cookies.get(SELLER_DRAFT_COOKIE), source="eitaa")
+    return templates.TemplateResponse(
+        request,
+        "eitaa.html",
+        {
+            "draft_submission": draft_submission,
+            "draft_remaining_count": draft_remaining_count,
+        },
+    )
 
 
 def _set_seller_draft_cookie(response: Response, submission_id: int) -> None:
@@ -299,25 +316,23 @@ async def process_eitaa_submission(submission_id: int) -> None:
             db.add(row)
             db.flush()
 
-            image_bytes = await _store_eitaa_product_image(uniom, row, draft)
-            image_results: list[TorobSearchResult] = []
+            image_task: asyncio.Task[EitaaImageSearchOutcome] | None = None
             if (
-                image_bytes
+                draft.best_photo
                 and settings.eitaa_image_match_enabled
                 and not image_matching_blocked
                 and image_match_attempts < settings.eitaa_image_match_limit
             ):
-                image_match_attempts += 1
-                try:
-                    image_results = await torob.search_by_image_bytes(image_bytes, size=5)
-                except TorobClientError as exc:
-                    if _is_blocking_torob_error(exc):
-                        image_matching_blocked = True
-                    image_results = []
+                image_task = asyncio.create_task(_search_eitaa_image_results(uniom, torob, row, draft))
 
             try:
                 text_results = await _search_eitaa_text_results(torob, draft.product_name, text_search_cache)
             except TorobClientError as exc:
+                image_outcome = await _finish_eitaa_image_task(image_task)
+                if image_outcome.attempted:
+                    image_match_attempts += 1
+                if image_outcome.error and _is_blocking_torob_error(image_outcome.error):
+                    image_matching_blocked = True
                 row.error_message = _row_torob_error_message(ProductSearchError(exc.code, exc.public_message))
                 db.commit()
                 consecutive_torob_failures += 1
@@ -326,6 +341,12 @@ async def process_eitaa_submission(submission_id: int) -> None:
                     break
                 continue
             consecutive_torob_failures = 0
+            image_outcome = await _finish_eitaa_image_task(image_task)
+            if image_outcome.attempted:
+                image_match_attempts += 1
+            if image_outcome.error and _is_blocking_torob_error(image_outcome.error):
+                image_matching_blocked = True
+            image_results = image_outcome.results
 
             match_by_prk: dict[str, TorobMatch] = {}
             for result in text_results:
@@ -429,6 +450,30 @@ def _append_matches(db: Session, row: SubmissionRow, results) -> int:
         added_count += 1
         next_rank += 1
     return added_count
+
+
+async def _search_eitaa_image_results(
+    uniom: UniomClient,
+    torob: TorobClient,
+    row: SubmissionRow,
+    draft: EitaaProductDraft,
+) -> EitaaImageSearchOutcome:
+    image_bytes = await _store_eitaa_product_image(uniom, row, draft)
+    if not image_bytes:
+        return EitaaImageSearchOutcome(results=[], attempted=False)
+    try:
+        return EitaaImageSearchOutcome(results=await torob.search_by_image_bytes(image_bytes, size=5), attempted=True)
+    except TorobClientError as exc:
+        return EitaaImageSearchOutcome(results=[], attempted=True, error=exc)
+
+
+async def _finish_eitaa_image_task(task: asyncio.Task[EitaaImageSearchOutcome] | None) -> EitaaImageSearchOutcome:
+    if task is None:
+        return EitaaImageSearchOutcome(results=[])
+    try:
+        return await task
+    except Exception:
+        return EitaaImageSearchOutcome(results=[])
 
 
 def _best_auto_match(
@@ -591,7 +636,9 @@ def _forbidden_torob_error_message() -> str:
 
 @router.get("/submissions/{submission_id}/processing-status")
 def processing_status(request: Request, submission_id: int, db: Session = Depends(get_db)) -> Response:
-    submission = _get_submission(db, submission_id)
+    submission = db.query(Submission).filter(Submission.id == submission_id).first()
+    if submission is None:
+        raise HTTPException(status_code=404, detail="Submission not found")
     if submission.status == "ready":
         return Response(status_code=204, headers={"HX-Redirect": f"/submissions/{submission.id}/match"})
     if submission.status == "failed":
@@ -601,13 +648,19 @@ def processing_status(request: Request, submission_id: int, db: Session = Depend
             {"submission": submission},
             headers={"X-Processing-State": "failed"},
         )
-    total_count = len([row for row in submission.rows if row.input_product_name])
-    processed_count = len(
-        [
-            row
-            for row in submission.rows
-            if row.input_product_name and (row.error_message or row.matches)
-        ]
+    total_count = (
+        db.query(SubmissionRow)
+        .filter(SubmissionRow.submission_id == submission.id, SubmissionRow.input_product_name.isnot(None))
+        .count()
+    )
+    processed_count = (
+        db.query(SubmissionRow)
+        .filter(
+            SubmissionRow.submission_id == submission.id,
+            SubmissionRow.input_product_name.isnot(None),
+            or_(SubmissionRow.error_message.isnot(None), SubmissionRow.matches.any()),
+        )
+        .count()
     )
     progress_percent = int((processed_count / total_count) * 100) if total_count else 0
     return templates.TemplateResponse(
@@ -786,8 +839,6 @@ async def confirm_submission(
     form = await request.form()
     submission = _get_submission(db, submission_id)
     finish_mode = str(form.get("finish_mode") or "complete")
-    if submission.source == "eitaa":
-        finish_mode = "complete"
     save_result = _save_submission_selections(form, submission, db, mark_submitted=True)
     selected_count = save_result.submitted_count
     submission.selected_rows = save_result.total_selected_count
@@ -914,6 +965,10 @@ def _render_match(request: Request, db: Session, submission_id: int) -> Response
     parseable_rows = [row for row in visible_rows if row.input_product_name]
     valid_rows = [row for row in visible_rows if row.input_product_name and row.matches and not row.error_message]
     invalid_rows = [row for row in visible_rows if row.error_message]
+    eitaa_ready_rows = [row for row in parseable_rows if _is_eitaa_ready_row(row)]
+    eitaa_review_rows = [row for row in parseable_rows if row not in eitaa_ready_rows]
+    eitaa_missing_price_count = len([row for row in eitaa_review_rows if not row.final_price and not row.input_price])
+    eitaa_needs_match_count = len([row for row in eitaa_review_rows if row.matches and not row.selections and not row.error_message])
     price_unit_row_ids = _price_unit_row_ids(submission, visible_rows)
     return templates.TemplateResponse(
         request,
@@ -924,6 +979,12 @@ def _render_match(request: Request, db: Session, submission_id: int) -> Response
             "parseable_count": len(parseable_rows),
             "valid_count": len(valid_rows),
             "invalid_rows": invalid_rows,
+            "eitaa_ready_rows": eitaa_ready_rows,
+            "eitaa_review_rows": eitaa_review_rows,
+            "eitaa_ready_count": len(eitaa_ready_rows),
+            "eitaa_review_count": len(eitaa_review_rows),
+            "eitaa_missing_price_count": eitaa_missing_price_count,
+            "eitaa_needs_match_count": eitaa_needs_match_count,
             "price_unit_row_ids": price_unit_row_ids,
             "submission_price_unit": submission.price_unit,
             "submitted_rows_count": len([row for row in submission.rows if row.submitted_at]),
@@ -961,7 +1022,11 @@ def _remaining_selectable_count(submission: Submission) -> int:
     return len([row for row in _visible_selection_rows(submission) if row.input_product_name])
 
 
-def _get_resume_state(db: Session, cookie_value: str | None) -> tuple[Submission | None, int]:
+def _is_eitaa_ready_row(row: SubmissionRow) -> bool:
+    return bool(row.input_product_name and row.selections and row.final_price and not row.error_message)
+
+
+def _get_resume_state(db: Session, cookie_value: str | None, source: str = "excel") -> tuple[Submission | None, int]:
     if not cookie_value or not cookie_value.isdigit():
         return None, 0
     submission = (
@@ -975,7 +1040,7 @@ def _get_resume_state(db: Session, cookie_value: str | None) -> tuple[Submission
     )
     if submission is None:
         return None, 0
-    if submission.source != "excel" or submission.status != "ready":
+    if submission.source != source or submission.status != "ready":
         return None, 0
     remaining_count = _remaining_selectable_count(submission)
     if remaining_count <= 0:

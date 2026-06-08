@@ -6,6 +6,16 @@
 </section>
 
 <section class="shell">
+  {% if draft_submission %}
+    <div class="resume-card">
+      <div class="resume-copy">
+        <strong>بررسی محصولات {{ draft_submission.store_name }} ناتمام مانده</strong>
+        <span>{{ draft_remaining_count }} محصول هنوز مانده. هرچه محصول بیشتری اضافه کنی، بیشتر دیده می‌شی و مشتری بیشتری می‌گیری.</span>
+      </div>
+      <a class="btn" href="/submissions/{{ draft_submission.id }}/match">ادامه بررسی محصولات</a>
+    </div>
+  {% endif %}
+
   <div class="section-actions">
     <a class="btn secondary subtle" href="/">بازگشت به صفحه اصلی</a>
   </div>
