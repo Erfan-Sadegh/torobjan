@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     session_secret: str = "change-this-secret"
     upload_dir: str = "data/uploads"
     clarity_project_id: str = ""
+    enable_basalam_search: bool = False
 
     torob_base_url: str = "https://api.torob.com"
     torob_proxy_token: str = ""

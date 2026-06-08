@@ -7,6 +7,36 @@ from app.services.torob import TorobSearchResult
 
 
 @pytest.mark.asyncio
+async def test_product_search_uses_only_torob_by_default() -> None:
+    class FakeTorob:
+        async def search_base_products(self, query: str, size: int = 5, page: int = 0):
+            return [
+                TorobSearchResult(
+                    rank=index,
+                    base_prk=f"torob-{index}",
+                    name=f"رب ترب {index}",
+                    price=100000 + index,
+                    price_text=None,
+                    image_url=None,
+                    product_url=f"https://torob.com/p/torob-{index}",
+                    is_already_added=False,
+                )
+                for index in range(size)
+            ]
+
+        async def close(self):
+            return None
+
+    client = ProductSearchClient()
+    client.torob = FakeTorob()
+
+    results = await client.search_products("رب")
+
+    assert [item.source for item in results] == ["torob", "torob", "torob", "torob"]
+    assert [item.base_prk for item in results] == ["torob-0", "torob-1", "torob-2", "torob-3"]
+
+
+@pytest.mark.asyncio
 async def test_product_search_does_not_wait_long_for_slow_basalam(monkeypatch) -> None:
     class FakeTorob:
         async def search_base_products(self, query: str, size: int = 5, page: int = 0):

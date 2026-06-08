@@ -43,4 +43,5 @@ def create_templates() -> Jinja2Templates:
     templates.env.filters["price_input"] = price_input_value
     templates.env.filters["price_input_for_unit"] = price_input_for_unit
     templates.env.globals["clarity_project_id"] = settings.clarity_project_id.strip()
+    templates.env.globals["enable_basalam_search"] = settings.enable_basalam_search
     return templates

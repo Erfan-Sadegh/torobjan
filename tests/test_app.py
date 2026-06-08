@@ -49,14 +49,14 @@ class FakeProductSearchClient:
                 is_already_added=False,
             ),
             ProductSearchResult(
-                source="basalam",
+                source="torob",
                 rank=1,
-                base_prk="basalam-2",
-                name=f"{query} باسلام",
+                base_prk="base-2",
+                name=f"{query} ترب دوم",
                 price=155000,
                 price_text="از ۱۵۵۰۰۰ تومان",
                 image_url="https://image.example/b.jpg",
-                product_url="https://basalam.com/p/basalam-2",
+                product_url="https://torob.com/p/base-2",
                 is_already_added=False,
             ),
             ProductSearchResult(
@@ -71,14 +71,14 @@ class FakeProductSearchClient:
                 is_already_added=False,
             ),
             ProductSearchResult(
-                source="basalam",
+                source="torob",
                 rank=3,
-                base_prk="basalam-4",
-                name=f"{query} باسلام دوم",
+                base_prk="base-4",
+                name=f"{query} ترب چهارم",
                 price=165000,
                 price_text="از ۱۶۵۰۰۰ تومان",
                 image_url="https://image.example/d.jpg",
-                product_url="https://basalam.com/p/basalam-4",
+                product_url="https://torob.com/p/base-4",
                 is_already_added=False,
             )
         ]
@@ -295,7 +295,8 @@ def test_upload_confirm_admin_export(monkeypatch, tmp_path) -> None:
     assert f'value="{match_id}" checked' not in match_page.text
     assert f'value="{second_match_id}" checked' not in match_page.text
     assert "قیمت ترب: 150,000 تومان" in match_page.text
-    assert "قیمت باسلام: 155,000 تومان" in match_page.text
+    assert "قیمت ترب: 155,000 تومان" in match_page.text
+    assert "قیمت باسلام" not in match_page.text
     assert "بیشتر" in match_page.text
     assert 'value="165,000"' in match_page.text
     assert "محصول انتخاب شده" in match_page.text
@@ -331,8 +332,8 @@ def test_upload_confirm_admin_export(monkeypatch, tmp_path) -> None:
     assert sheet["H2"].value == "torob"
     assert sheet["I2"].value == "base-1"
     assert sheet["L2"].value == "170000"
-    assert sheet["H3"].value == "basalam"
-    assert sheet["I3"].value == "basalam-2"
+    assert sheet["H3"].value == "torob"
+    assert sheet["I3"].value == "base-2"
     assert sheet["L3"].value == "170000"
 
     detail = client.get(f"/admin/submissions/{submission_id}")
@@ -351,16 +352,18 @@ def test_upload_confirm_admin_export(monkeypatch, tmp_path) -> None:
     assert FakeTorobBulkAddClient.calls
     sent_shop_id, sent_items = FakeTorobBulkAddClient.calls[0]
     assert sent_shop_id == 411147
-    assert len(sent_items) == 1
+    assert len(sent_items) == 2
     assert sent_items[0].base_product_rk == "base-1"
     assert sent_items[0].price == 170000
+    assert sent_items[1].base_product_rk == "base-2"
+    assert sent_items[1].price == 170000
 
     with TestingSessionLocal() as db:
         submission = db.query(Submission).first()
         batch = submission.batches[0]
         assert batch.status == "sent"
-        assert batch.torob_sent_count == 1
-        assert batch.torob_skipped_count == 1
+        assert batch.torob_sent_count == 2
+        assert batch.torob_skipped_count == 0
 
     listing = client.get("/admin/submissions")
     assert listing.status_code == 200

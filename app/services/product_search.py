@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from app.services.basalam import BasalamClient, BasalamClientError
 from app.services.torob import TorobClient, TorobClientError
+from app.settings import settings
 
 BASALAM_EXTRA_WAIT_SECONDS = 0.9
 
@@ -25,18 +26,29 @@ class ProductSearchResult:
 class ProductSearchClient:
     def __init__(self) -> None:
         self.torob = TorobClient()
-        self.basalam = BasalamClient()
+        self.basalam = BasalamClient() if settings.enable_basalam_search else None
 
     async def close(self) -> None:
-        await asyncio.gather(self.torob.close(), self.basalam.close(), return_exceptions=True)
+        close_tasks = [self.torob.close()]
+        if self.basalam is not None:
+            close_tasks.append(self.basalam.close())
+        await asyncio.gather(*close_tasks, return_exceptions=True)
 
     async def search_products(self, query: str, page: int = 0, per_source: int = 2) -> list[ProductSearchResult]:
         fallback_size = per_source * 2
         torob_size = fallback_size * (page + 1)
         torob_task = asyncio.create_task(self.torob.search_base_products(query, size=torob_size, page=0))
-        basalam_task = asyncio.create_task(self.basalam.search_products(query, size=per_source, page=page))
+        basalam_task = (
+            asyncio.create_task(self.basalam.search_products(query, size=per_source, page=page))
+            if self.basalam is not None
+            else None
+        )
         torob_response = await _task_result(torob_task)
-        basalam_response = await _task_result_with_timeout(basalam_task, BASALAM_EXTRA_WAIT_SECONDS)
+        basalam_response = (
+            await _task_result_with_timeout(basalam_task, BASALAM_EXTRA_WAIT_SECONDS)
+            if basalam_task is not None
+            else []
+        )
 
         torob_results: list[ProductSearchResult] = []
         basalam_results: list[ProductSearchResult] = []
