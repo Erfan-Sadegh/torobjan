@@ -14,6 +14,14 @@ class Settings(BaseSettings):
     upload_dir: str = "data/uploads"
     clarity_project_id: str = ""
     enable_basalam_search: bool = False
+    uniom_base_url: str = "https://uniom.ir"
+    uniom_bot_token: str = ""
+    uniom_timeout_seconds: float = Field(default=25, gt=0)
+    eitaa_history_limit: int = Field(default=200, ge=1, le=1000)
+    eitaa_max_products: int = Field(default=200, ge=1, le=500)
+    eitaa_image_match_enabled: bool = False
+    eitaa_image_match_limit: int = Field(default=20, ge=0, le=200)
+    eitaa_auto_match_threshold: float = Field(default=0.72, ge=0, le=1)
 
     torob_base_url: str = "https://api.torob.com"
     torob_proxy_token: str = ""

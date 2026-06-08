@@ -7,13 +7,23 @@
     <div class="processing-note">
       <span aria-hidden="true">☕</span>
       <p>
-        در حال جستجو در ترب{% if enable_basalam_search %} و باسلام{% endif %}. تا پردازش انجام میشه می‌تونی بری یه چایی بخوری و برگردی، ولی لطفا این صفحه رو نبند :)
+        {% if submission.source == "eitaa" %}
+          در حال خواندن کانال ایتا و جستجو در ترب. تا پردازش انجام میشه می‌تونی بری یه چایی بخوری و برگردی، ولی لطفا این صفحه رو نبند :)
+        {% else %}
+          در حال جستجو در ترب{% if enable_basalam_search %} و باسلام{% endif %}. تا پردازش انجام میشه می‌تونی بری یه چایی بخوری و برگردی، ولی لطفا این صفحه رو نبند :)
+        {% endif %}
         {% if total_count >= 500 %}
           فعلا تا ۵۰۰ ردیف اول فایل پردازش می‌شود.
         {% endif %}
       </p>
     </div>
   {% else %}
-    <div class="hint">در حال پردازش و جستجوی محصولات از ترب{% if enable_basalam_search %} و باسلام{% endif %}.</div>
+    <div class="hint">
+      {% if submission.source == "eitaa" %}
+        در حال خواندن کانال ایتا و جستجوی محصولات در ترب.
+      {% else %}
+        در حال پردازش و جستجوی محصولات از ترب{% if enable_basalam_search %} و باسلام{% endif %}.
+      {% endif %}
+    </div>
   {% endif %}
 </div>

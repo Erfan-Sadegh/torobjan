@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import hmac
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
@@ -132,6 +133,18 @@ def export_submission(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}.xlsx"'},
     )
+
+
+@router.get("/rows/{row_id}/source-image")
+def row_source_image(request: Request, row_id: int, db: Session = Depends(get_db)) -> Response:
+    _require_admin(request)
+    row = db.query(SubmissionRow).filter(SubmissionRow.id == row_id).first()
+    if row is None or not row.source_image_path:
+        raise HTTPException(status_code=404, detail="Image not found")
+    path = Path(row.source_image_path)
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Image not found")
+    return FileResponse(path)
 
 
 @router.post("/submissions/{submission_id}/batches/{batch_id}/send-torob")

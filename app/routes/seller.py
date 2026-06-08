@@ -11,8 +11,11 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.database import SessionLocal, get_db
 from app.models import Submission, SubmissionBatch, SubmissionBatchItem, SubmissionRow, SubmissionSelection, TorobMatch, utc_now
+from app.services.eitaa import EitaaProductDraft, extract_eitaa_products, score_product_match
 from app.services.excel import ExcelParseError, build_template_xlsx, parse_price, parse_products_excel
 from app.services.product_search import ProductSearchClient, ProductSearchError
+from app.services.torob import TorobClient, TorobClientError, TorobSearchResult
+from app.services.uniom import UniomClient, UniomClientError
 from app.settings import settings
 from app.template_utils import create_templates
 
@@ -50,6 +53,11 @@ def template_xlsx() -> Response:
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="torobjan-template.xlsx"'},
     )
+
+
+@router.get("/eitaa")
+def eitaa_page(request: Request) -> Response:
+    return templates.TemplateResponse(request, "eitaa.html")
 
 
 def _set_seller_draft_cookie(response: Response, submission_id: int) -> None:
@@ -142,6 +150,56 @@ async def upload_products(
     return response
 
 
+@router.post("/eitaa/import")
+async def import_eitaa_products(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    store_name: str = Form(...),
+    seller_phone: str | None = Form(default=None),
+    channel_id: str = Form(...),
+    db: Session = Depends(get_db),
+) -> Response:
+    store_name = store_name.strip()
+    channel_id = _normalize_eitaa_channel(channel_id)
+    if not store_name:
+        return templates.TemplateResponse(
+            request,
+            "eitaa.html",
+            {"error": "نام فروشگاه الزامی است.", "channel_id": channel_id},
+            status_code=400,
+        )
+    if not channel_id:
+        return templates.TemplateResponse(
+            request,
+            "eitaa.html",
+            {"error": "آیدی کانال ایتا را وارد کن.", "store_name": store_name},
+            status_code=400,
+        )
+    if not settings.uniom_bot_token:
+        return templates.TemplateResponse(
+            request,
+            "eitaa.html",
+            {"error": "توکن یونیوم هنوز در تنظیمات سرویس فعال نشده است.", "store_name": store_name, "channel_id": channel_id},
+            status_code=503,
+        )
+
+    submission = Submission(
+        store_name=store_name,
+        seller_phone=(seller_phone or "").strip() or None,
+        source="eitaa",
+        source_ref=channel_id,
+        status="processing",
+    )
+    db.add(submission)
+    db.commit()
+    db.refresh(submission)
+
+    background_tasks.add_task(process_eitaa_submission, submission.id)
+    response = templates.TemplateResponse(request, "processing.html", {"submission": submission})
+    _set_seller_draft_cookie(response, submission.id)
+    return response
+
+
 async def process_submission_matches(submission_id: int) -> None:
     db = SessionLocal()
     client = ProductSearchClient()
@@ -197,6 +255,126 @@ async def process_submission_matches(submission_id: int) -> None:
         db.close()
 
 
+async def process_eitaa_submission(submission_id: int) -> None:
+    db = SessionLocal()
+    uniom = UniomClient()
+    torob = TorobClient()
+    try:
+        submission = _get_submission(db, submission_id)
+        channel_id = submission.source_ref or ""
+        await uniom.get_chat(channel_id)
+        messages = await uniom.get_chat_history(channel_id, limit=settings.eitaa_history_limit)
+        drafts = extract_eitaa_products(messages, max_products=settings.eitaa_max_products)
+        submission.total_rows = len(drafts)
+        if not drafts:
+            submission.status = "failed"
+            submission.error_message = "در پیام‌های اخیر کانال، محصول قیمت‌دار قابل پردازش پیدا نشد."
+            db.commit()
+            return
+
+        selected_items: list[tuple[int, int, str]] = []
+        image_match_attempts = 0
+        for index, draft in enumerate(drafts, start=1):
+            row = SubmissionRow(
+                submission_id=submission.id,
+                input_row=index,
+                input_product_name=draft.product_name,
+                input_price=draft.price_toman,
+                description=draft.description,
+                source_message_id=draft.message_id,
+                final_price=draft.price_toman,
+            )
+            db.add(row)
+            db.flush()
+
+            image_bytes = await _store_eitaa_product_image(uniom, row, draft)
+            image_results: list[TorobSearchResult] = []
+            if (
+                image_bytes
+                and settings.eitaa_image_match_enabled
+                and image_match_attempts < settings.eitaa_image_match_limit
+            ):
+                image_match_attempts += 1
+                try:
+                    image_results = await torob.search_by_image_bytes(image_bytes, size=5)
+                except TorobClientError:
+                    image_results = []
+
+            try:
+                text_results = await torob.search_base_products(draft.product_name, size=6)
+            except TorobClientError as exc:
+                row.error_message = _row_torob_error_message(ProductSearchError(exc.code, exc.public_message))
+                db.commit()
+                continue
+
+            match_by_prk: dict[str, TorobMatch] = {}
+            for result in text_results:
+                match = _append_single_torob_match(row, result, source="torob")
+                match_by_prk[match.base_prk] = match
+            for result in image_results:
+                if result.base_prk not in match_by_prk:
+                    match = _append_single_torob_match(row, result, source="torob_image")
+                    match_by_prk[match.base_prk] = match
+
+            db.flush()
+            selected_match, score = _best_auto_match(draft.product_name, text_results, image_results, match_by_prk)
+            row.auto_match_score = int(score * 100)
+            if not draft.price_toman:
+                row.error_message = "قیمت محصول در متن کانال پیدا نشد."
+            elif selected_match is None:
+                row.error_message = "تطبیق مطمئن با محصول ترب پیدا نشد؛ این مورد برای ارسال خودکار آماده نشد."
+            else:
+                row.selected_match_id = selected_match.id
+                row.final_price = draft.price_toman
+                row.submitted_at = utc_now()
+                db.add(SubmissionSelection(row_id=row.id, match_id=selected_match.id, final_price=draft.price_toman))
+                db.flush()
+                selected_items.append((row.id, selected_match.id, draft.price_toman))
+            db.commit()
+
+        if selected_items:
+            now = utc_now()
+            batch = SubmissionBatch(
+                submission_id=submission.id,
+                status="pending",
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(batch)
+            db.flush()
+            for row_id, match_id, price in selected_items:
+                db.add(
+                    SubmissionBatchItem(
+                        batch_id=batch.id,
+                        row_id=row_id,
+                        match_id=match_id,
+                        final_price=price,
+                        created_at=now,
+                    )
+                )
+        submission.selected_rows = len(selected_items)
+        submission.status = "submitted" if selected_items else "ready"
+        db.commit()
+    except UniomClientError as exc:
+        db.rollback()
+        submission = db.query(Submission).filter(Submission.id == submission_id).first()
+        if submission is not None:
+            submission.status = "failed"
+            submission.error_message = exc.public_message
+            db.commit()
+    except Exception as exc:
+        db.rollback()
+        submission = db.query(Submission).filter(Submission.id == submission_id).first()
+        if submission is not None:
+            submission.status = "failed"
+            submission.error_message = f"پردازش کانال ایتا با خطا متوقف شد: {exc}"
+            db.commit()
+    finally:
+        await torob.close()
+        await uniom.close()
+        db.close()
+
+
 def _row_from_parsed(submission_id: int, parsed) -> SubmissionRow:
     return SubmissionRow(
         submission_id=submission_id,
@@ -208,6 +386,22 @@ def _row_from_parsed(submission_id: int, parsed) -> SubmissionRow:
         description=parsed.description,
         error_message=parsed.error_message,
     )
+
+
+def _append_single_torob_match(row: SubmissionRow, result: TorobSearchResult, source: str) -> TorobMatch:
+    match = TorobMatch(
+        source=source,
+        rank=len(row.matches),
+        base_prk=result.base_prk,
+        name=result.name,
+        price=result.price,
+        price_text=result.price_text,
+        image_url=result.image_url,
+        product_url=result.product_url,
+        is_already_added=result.is_already_added,
+    )
+    row.matches.append(match)
+    return match
 
 
 def _append_matches(db: Session, row: SubmissionRow, results) -> int:
@@ -235,6 +429,27 @@ def _append_matches(db: Session, row: SubmissionRow, results) -> int:
         added_count += 1
         next_rank += 1
     return added_count
+
+
+def _best_auto_match(
+    product_name: str,
+    text_results: list[TorobSearchResult],
+    image_results: list[TorobSearchResult],
+    match_by_prk: dict[str, TorobMatch],
+) -> tuple[TorobMatch | None, float]:
+    image_prks = {result.base_prk for result in image_results[:3]}
+    best_match: TorobMatch | None = None
+    best_score = 0.0
+    for result in text_results:
+        score = score_product_match(product_name, result.name)
+        if result.base_prk in image_prks:
+            score = min(1.0, score + 0.16)
+        if score > best_score:
+            best_score = score
+            best_match = match_by_prk.get(result.base_prk)
+    if best_match is None or best_score < settings.eitaa_auto_match_threshold:
+        return None, best_score
+    return best_match, best_score
 
 
 def _global_torob_error_message(exc: ProductSearchError) -> str:
@@ -308,6 +523,8 @@ def _forbidden_torob_error_message() -> str:
 @router.get("/submissions/{submission_id}/processing-status")
 def processing_status(request: Request, submission_id: int, db: Session = Depends(get_db)) -> Response:
     submission = _get_submission(db, submission_id)
+    if submission.source == "eitaa" and submission.status in {"ready", "submitted"}:
+        return Response(status_code=204, headers={"HX-Redirect": f"/submissions/{submission.id}/eitaa-summary"})
     if submission.status == "ready":
         return Response(status_code=204, headers={"HX-Redirect": f"/submissions/{submission.id}/match"})
     if submission.status == "failed":
@@ -336,6 +553,26 @@ def processing_status(request: Request, submission_id: int, db: Session = Depend
             "progress_percent": progress_percent,
         },
     )
+
+
+@router.get("/submissions/{submission_id}/eitaa-summary")
+def eitaa_summary(request: Request, submission_id: int, db: Session = Depends(get_db)) -> Response:
+    submission = _get_submission(db, submission_id)
+    if submission.source != "eitaa":
+        return Response(status_code=303, headers={"Location": f"/submissions/{submission.id}/match"})
+    matched_count = sum(len(row.selections) for row in submission.rows)
+    needs_review_count = len([row for row in submission.rows if row.input_product_name and not row.selections])
+    response = templates.TemplateResponse(
+        request,
+        "eitaa_summary.html",
+        {
+            "submission": submission,
+            "matched_count": matched_count,
+            "needs_review_count": needs_review_count,
+        },
+    )
+    _clear_seller_draft_cookie(response)
+    return response
 
 
 @router.get("/submissions/{submission_id}/match")
@@ -432,6 +669,38 @@ def _store_upload_file(submission_id: int, filename: str, content: bytes) -> str
     path = upload_dir / f"{submission_id}-{safe_name}"
     path.write_bytes(content)
     return str(path)
+
+
+async def _store_eitaa_product_image(uniom: UniomClient, row: SubmissionRow, draft: EitaaProductDraft) -> bytes | None:
+    photo = draft.best_photo
+    if photo is None:
+        return None
+    try:
+        file_info = await uniom.get_file(photo.file_id)
+        image_bytes = await uniom.download_file(file_info.file_path)
+    except UniomClientError:
+        return None
+    if not image_bytes:
+        return None
+    upload_dir = Path(settings.upload_dir) / "eitaa"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    safe_message_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", draft.message_id).strip("-") or str(row.id)
+    path = upload_dir / f"{row.submission_id}-{row.id}-{safe_message_id}.jpg"
+    path.write_bytes(image_bytes)
+    row.source_image_path = str(path)
+    return image_bytes
+
+
+def _normalize_eitaa_channel(value: str | None) -> str:
+    text = (value or "").strip()
+    if not text:
+        return ""
+    text = text.replace("https://eitaa.com/", "").replace("http://eitaa.com/", "")
+    text = text.replace("https://www.eitaa.com/", "").replace("http://www.eitaa.com/", "")
+    text = text.strip().strip("/")
+    if text.startswith("@"):
+        return text
+    return f"@{text}"
 
 
 @router.post("/submissions/{submission_id}/confirm")
@@ -621,7 +890,7 @@ def _get_resume_state(db: Session, cookie_value: str | None) -> tuple[Submission
     )
     if submission is None:
         return None, 0
-    if submission.status != "ready":
+    if submission.source != "excel" or submission.status != "ready":
         return None, 0
     remaining_count = _remaining_selectable_count(submission)
     if remaining_count <= 0:

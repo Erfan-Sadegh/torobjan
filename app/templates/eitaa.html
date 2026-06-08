@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="shell hero">
+  <h1>وارد کردن محصولات از کانال ایتا</h1>
+</section>
+
+<section class="shell">
+  <div class="section-actions">
+    <a class="btn secondary subtle" href="/">بازگشت به صفحه اصلی</a>
+  </div>
+  <form class="panel grid upload-form" action="/eitaa/import" method="post">
+    {% if error %}
+      <div class="error">{{ error }}</div>
+    {% endif %}
+    <div class="form-grid grid">
+      <div class="field">
+        <label for="store_name">نام فروشگاه</label>
+        <input id="store_name" name="store_name" type="text" required value="{{ store_name or '' }}" placeholder="مثلا فروشگاه رگال">
+      </div>
+      <div class="field">
+        <label for="seller_phone">شماره موبایل، اختیاری</label>
+        <input id="seller_phone" name="seller_phone" type="text" inputmode="tel" value="{{ seller_phone or '' }}" placeholder="مثلا 09121234567">
+        <div class="hint">اگر پردازش کانال مشکلی داشت، بتوانیم باهات تماس بگیریم.</div>
+      </div>
+    </div>
+    <div class="field">
+      <label for="channel_id">آیدی کانال ایتا</label>
+      <input id="channel_id" name="channel_id" type="text" required dir="ltr" value="{{ channel_id or '' }}" placeholder="@regaal">
+      <div class="hint">فعلا پیام‌های اخیر کانال خوانده می‌شود؛ محصول‌ها باید در متن پیام قیمت داشته باشند.</div>
+    </div>
+    <div class="processing-note">
+      <span aria-hidden="true">☕</span>
+      <p>بعد از شروع، پیام‌های کانال خوانده می‌شود و مواردی که با اطمینان بالا در ترب پیدا شوند آماده ثبت می‌شوند.</p>
+    </div>
+    <div>
+      <button class="btn submit-btn" type="submit">
+        <span class="idle-label">شروع پردازش کانال</span>
+        <span class="loading-label">در حال شروع پردازش...</span>
+      </button>
+    </div>
+  </form>
+</section>
+<script>
+  document.querySelectorAll(".upload-form").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = form.querySelector(".submit-btn");
+      if (button) {
+        button.disabled = true;
+        button.classList.add("is-loading");
+      }
+      try {
+        const response = await fetch(form.action, {
+          method: "POST",
+          body: new FormData(form),
+          headers: { "X-Requested-With": "fetch" }
+        });
+        const html = await response.text();
+        document.open();
+        document.write(html);
+        document.close();
+      } catch {
+        if (button) {
+          button.disabled = false;
+          button.classList.remove("is-loading");
+        }
+        const error = document.createElement("div");
+        error.className = "error";
+        error.textContent = "ارتباط با سرور قطع شد. دوباره تلاش کن.";
+        form.prepend(error);
+      }
+    });
+  });
+</script>
+{% endblock %}

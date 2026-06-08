@@ -22,6 +22,10 @@
         <input class="ltr" type="text" value="{{ submission.seller_phone or '-' }}" disabled>
       </div>
       <div class="field">
+        <label>منبع</label>
+        <input type="text" value="{{ submission.source or 'excel' }}{% if submission.source_ref %} - {{ submission.source_ref }}{% endif %}" disabled>
+      </div>
+      <div class="field">
         <label for="shop_id">Shop ID</label>
         <input id="shop_id" name="shop_id" type="text" value="{{ submission.shop_id or '' }}">
       </div>
@@ -126,6 +130,7 @@
       <thead>
         <tr>
           <th>ردیف</th>
+          <th>عکس</th>
           <th>ورودی</th>
           <th>انتخاب</th>
           <th>قیمت نهایی</th>
@@ -136,14 +141,21 @@
         {% for row in rows %}
           <tr>
             <td>{{ row.input_row }}</td>
+            <td>
+              {% if row.source_image_path %}
+                <img class="admin-thumb" src="/admin/rows/{{ row.id }}/source-image" alt="">
+              {% else %}
+                -
+              {% endif %}
+            </td>
             <td>{{ row.input_product_name or "-" }}</td>
             <td>
               {% if row.selections %}
                 {% for selection in row.selections %}
-                  <div>{{ selection.match.name }} <span class="hint">({{ selection.match.source or "torob" }})</span></div>
+                  <div>{{ selection.match.name }} <span class="hint">({{ selection.match.source or "torob" }}{% if row.auto_match_score %}، {{ row.auto_match_score }}٪{% endif %})</span></div>
                 {% endfor %}
               {% elif row.selected_match %}
-                {{ row.selected_match.name }} <span class="hint">({{ row.selected_match.source or "torob" }})</span>
+                {{ row.selected_match.name }} <span class="hint">({{ row.selected_match.source or "torob" }}{% if row.auto_match_score %}، {{ row.auto_match_score }}٪{% endif %})</span>
               {% else %}
                 -
               {% endif %}

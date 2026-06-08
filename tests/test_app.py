@@ -234,6 +234,56 @@ class FakeTorobBulkAddClient:
         return None
 
 
+class FakeUniomClient:
+    async def get_chat(self, chat_id: str) -> dict:
+        return {"id": 1, "type": "channel", "username": chat_id.removeprefix("@")}
+
+    async def get_chat_history(self, chat_id: str, limit: int, offset_id: int | None = None) -> list[dict]:
+        return [
+            {
+                "message_id": 11,
+                "date": 1755439679,
+                "text": "کتونی نایک وودو\r\nقیمت: 668٬000 تومان\r\nارتباط: @seller",
+            },
+            {
+                "message_id": 10,
+                "date": 1755439656,
+                "photo": [{"file_id": "photo-large", "width": 800, "height": 800}],
+            },
+        ]
+
+    async def get_file(self, file_id: str):
+        return SimpleNamespace(file_id=file_id, file_path="files/photo-large.jpg")
+
+    async def download_file(self, file_path: str) -> bytes:
+        return b"fake-image"
+
+    async def close(self) -> None:
+        return None
+
+
+class FakeEitaaTorobClient:
+    async def search_base_products(self, query: str, size: int = 5, page: int = 0) -> list[TorobSearchResult]:
+        return [
+            TorobSearchResult(
+                rank=0,
+                base_prk="nike-voodoo",
+                name="کتونی نایک مدل وودو",
+                price=668000,
+                price_text="از ۶۶۸٬۰۰۰ تومان",
+                image_url="https://image.example/nike.jpg",
+                product_url="https://torob.com/p/nike-voodoo",
+                is_already_added=False,
+            )
+        ]
+
+    async def search_by_image_bytes(self, image_bytes: bytes, size: int = 5) -> list[TorobSearchResult]:
+        return []
+
+    async def close(self) -> None:
+        return None
+
+
 def test_upload_confirm_admin_export(monkeypatch, tmp_path) -> None:
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
@@ -1035,6 +1085,86 @@ def test_admin_can_rebuild_batch_from_legacy_selections(monkeypatch, tmp_path) -
     assert sent_shop_id == 411488
     assert sent_items[0].base_product_rk == "legacy-base"
     assert sent_items[0].price == 100000
+
+
+def test_eitaa_import_auto_matches_and_creates_admin_batch(monkeypatch, tmp_path) -> None:
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    db_path = tmp_path / "test.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(bind=engine)
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    monkeypatch.setattr("app.routes.seller.SessionLocal", TestingSessionLocal)
+    monkeypatch.setattr("app.routes.seller.UniomClient", FakeUniomClient)
+    monkeypatch.setattr("app.routes.seller.TorobClient", FakeEitaaTorobClient)
+    monkeypatch.setattr("app.routes.seller.settings.uniom_bot_token", "test-token")
+    monkeypatch.setattr("app.routes.seller.settings.upload_dir", str(tmp_path / "uploads"))
+    monkeypatch.setattr("app.routes.admin.settings.admin_password", "secret")
+    monkeypatch.setattr("app.routes.admin.settings.session_secret", "test-cookie")
+    monkeypatch.setattr("app.routes.admin.settings.torob_bulk_add_key", "bulk-test-key")
+
+    app = create_app()
+    app.dependency_overrides[get_db] = override_get_db
+    client = TestClient(app)
+
+    response = client.post(
+        "/eitaa/import",
+        data={"store_name": "فروشگاه ایتا", "seller_phone": "09121234567", "channel_id": "regaal"},
+    )
+    assert response.status_code == 200
+    assert "کانال دریافت شد" in response.text
+
+    with TestingSessionLocal() as db:
+        submission = db.query(Submission).first()
+        assert submission is not None
+        assert submission.source == "eitaa"
+        assert submission.source_ref == "@regaal"
+        assert submission.status == "submitted"
+        assert submission.total_rows == 1
+        assert submission.selected_rows == 1
+        assert len(submission.rows) == 1
+        row = submission.rows[0]
+        assert row.input_product_name == "کتونی نایک وودو"
+        assert row.input_price == "668000"
+        assert row.final_price == "668000"
+        assert row.source_image_path is not None
+        assert row.selected_match.base_prk == "nike-voodoo"
+        assert row.auto_match_score >= 72
+        assert len(submission.batches) == 1
+        assert submission.batches[0].selected_count == 1
+        submission_id = submission.id
+
+    status = client.get(f"/submissions/{submission_id}/processing-status")
+    assert status.status_code == 204
+    assert status.headers["HX-Redirect"] == f"/submissions/{submission_id}/eitaa-summary"
+
+    summary = client.get(f"/submissions/{submission_id}/eitaa-summary")
+    assert summary.status_code == 200
+    assert "محصولات کانال دریافت شد" in summary.text
+    assert "محصول آماده ثبت در ترب شد" in summary.text
+
+    login = client.post("/admin/login", data={"password": "secret"}, follow_redirects=False)
+    assert login.status_code == 303
+    update_shop_id = client.post(
+        f"/admin/submissions/{submission_id}/shop-id",
+        data={"shop_id": "411488"},
+        follow_redirects=False,
+    )
+    assert update_shop_id.status_code == 303
+    detail = client.get(f"/admin/submissions/{submission_id}")
+    assert detail.status_code == 200
+    assert "@regaal" in detail.text
+    assert "ارسال به ترب" in detail.text
+    assert "nike-voodoo" not in detail.text
 
 
 def test_index_has_loading_submit_state() -> None:

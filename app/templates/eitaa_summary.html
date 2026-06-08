@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="shell hero">
+  <h1>محصولات کانال دریافت شد</h1>
+  <p>مواردی که با اطمینان بالا در ترب پیدا شدند، برای بررسی و ارسال آماده شده‌اند.</p>
+</section>
+<section class="shell">
+  <div class="success">کد پیگیری: {{ submission.id }}</div>
+  <div class="panel eitaa-summary">
+    <div>
+      <strong>{{ submission.total_rows }}</strong>
+      <span>محصول قیمت‌دار از کانال خوانده شد</span>
+    </div>
+    <div>
+      <strong>{{ matched_count }}</strong>
+      <span>محصول آماده ثبت در ترب شد</span>
+    </div>
+    <div>
+      <strong>{{ needs_review_count }}</strong>
+      <span>مورد نیازمند بررسی ماند</span>
+    </div>
+  </div>
+  {% if matched_count %}
+    <div class="resume-benefit">
+      <span aria-hidden="true">✓</span>
+      <p>محصولات آماده بررسی هستند و به زودی در فروشگاهت قرار می‌گیرند.</p>
+    </div>
+  {% else %}
+    <div class="error">محصولی با اطمینان کافی برای ثبت خودکار آماده نشد؛ تیم ما موارد را بررسی می‌کند.</div>
+  {% endif %}
+  <div class="section-actions inline-actions">
+    <a class="btn secondary" href="/">بازگشت به صفحه اصلی</a>
+  </div>
+</section>
+{% endblock %}

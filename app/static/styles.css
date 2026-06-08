@@ -89,6 +89,62 @@ a {
   margin-bottom: 12px;
 }
 
+.import-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.import-choice-card {
+  min-height: 154px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  text-align: center;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.import-choice-card:hover {
+  border-color: rgba(215, 57, 72, 0.34);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
+}
+
+.import-choice-card strong {
+  font-size: 15px;
+}
+
+.import-choice-card span:last-child {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+.import-choice-icon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--torob);
+  background: rgba(215, 57, 72, 0.08);
+}
+
+.import-choice-icon svg {
+  width: 23px;
+  height: 23px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .top-link {
   min-height: 38px;
   display: inline-flex;
@@ -505,6 +561,34 @@ input[type="file"] {
 .progress-title {
   font-weight: 800;
   margin-bottom: 12px;
+}
+
+.eitaa-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.eitaa-summary div {
+  display: grid;
+  gap: 4px;
+  place-items: center;
+  min-height: 82px;
+  border-radius: 8px;
+  background: #f8f9fb;
+  padding: 10px;
+  text-align: center;
+}
+
+.eitaa-summary strong {
+  font-size: 22px;
+}
+
+.eitaa-summary span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
 }
 
 .progress-bar {
@@ -929,6 +1013,15 @@ th {
   margin-top: 18px;
 }
 
+.admin-thumb {
+  width: 58px;
+  height: 58px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #f8f9fb;
+}
+
 @media (max-width: 720px) {
   .form-grid,
   .row-actions {
@@ -952,6 +1045,11 @@ th {
 
   .section-actions {
     justify-content: flex-end;
+  }
+
+  .import-choice-grid,
+  .eitaa-summary {
+    grid-template-columns: 1fr;
   }
 
   .resume-card {

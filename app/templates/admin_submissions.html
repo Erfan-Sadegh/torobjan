@@ -15,6 +15,7 @@
           <th>شناسه</th>
           <th>فروشگاه</th>
           <th>موبایل</th>
+          <th>منبع</th>
           <th>Shop ID</th>
           <th>وضعیت</th>
           <th>تعداد</th>
@@ -29,6 +30,7 @@
             <td>{{ item.id }}</td>
             <td>{{ item.store_name }}</td>
             <td class="ltr">{{ item.seller_phone or "-" }}</td>
+            <td>{{ item.source or "excel" }}{% if item.source_ref %}<div class="hint">{{ item.source_ref }}</div>{% endif %}</td>
             <td>{{ item.shop_id or "-" }}</td>
             <td>{{ item.status }}</td>
             <td>{{ item.total_rows }}</td>
@@ -37,7 +39,7 @@
             <td><a href="/admin/submissions/{{ item.id }}">جزئیات</a></td>
           </tr>
         {% else %}
-          <tr><td colspan="9">هنوز چیزی ثبت نشده است.</td></tr>
+          <tr><td colspan="10">هنوز چیزی ثبت نشده است.</td></tr>
         {% endfor %}
       </tbody>
     </table>

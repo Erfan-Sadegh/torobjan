@@ -46,27 +46,7 @@ class TorobClient:
             "_landing_page": "home",
             "source": "next_mobile",
         }
-        headers = {
-            "accept": "*/*",
-            "accept-language": "en-US,en;q=0.9,fa;q=0.8",
-            "origin": "https://torob.com",
-            "referer": "https://torob.com/",
-            "sec-ch-ua": '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
-            "sec-ch-ua-mobile": "?1",
-            "sec-ch-ua-platform": '"Android"',
-            "sec-fetch-dest": "empty",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-site": "same-site",
-            "user-agent": "Mozilla/5.0 (Linux; Android 13; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36",
-        }
-        if settings.torob_proxy_token:
-            headers["x-proxy-token"] = settings.torob_proxy_token
-        if settings.torob_iw1_header:
-            headers["x-iw1"] = settings.torob_iw1_header
-        if settings.torob_cookie:
-            headers["cookie"] = settings.torob_cookie
-        if settings.torob_csrf_token:
-            headers["x-csrftoken"] = settings.torob_csrf_token
+        headers = self._request_headers()
 
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
@@ -129,6 +109,74 @@ class TorobClient:
         if isinstance(last_error, TorobClientError):
             raise last_error
         raise TorobClientError("torob_unavailable", "جستجو کامل نشد. دوباره تلاش کن.")
+
+    async def search_by_image_bytes(self, image_bytes: bytes, size: int = 5) -> list[TorobSearchResult]:
+        headers = self._request_headers(referer="https://torob.com/search-by-image/")
+        client = await self._get_client(headers)
+        try:
+            upload = await client.post(
+                f"{self.base_url}/v4/base-product/search-image-upload/",
+                files={"img": ("eitaa.jpg", image_bytes, "image/jpeg")},
+                headers=headers,
+            )
+            if _is_bot_challenge(upload):
+                raise TorobClientError("torob_bot_challenge", "سرچ تصویری ترب تایید نشد.")
+            upload.raise_for_status()
+            payload = upload.json()
+            image_url = payload.get("image_url")
+            if not image_url:
+                raise TorobClientError("torob_bad_response", "ترب برای سرچ تصویری image_url برنگرداند.")
+            params = {
+                "image_url": image_url,
+                "discover_method": "search_image_upload",
+                "source": "next_mobile",
+                "_landing_page": "search-by-image",
+                "crop_behavior": "with_initial_unchanged",
+            }
+            box = payload.get("detected_objects", {}).get("initial", {}).get("box", {})
+            if isinstance(box, dict):
+                for key in ("x", "y", "w", "h"):
+                    if key in box:
+                        params[key] = box[key]
+            search = await client.get(
+                f"{self.base_url}/v4/base-product/search-by-image/",
+                params=params,
+                headers=headers,
+            )
+            if _is_bot_challenge(search):
+                raise TorobClientError("torob_bot_challenge", "سرچ تصویری ترب تایید نشد.")
+            search.raise_for_status()
+            return parse_search_results(search.json(), size=size)
+        except TorobClientError:
+            raise
+        except (httpx.HTTPError, ValueError) as exc:
+            if isinstance(exc, httpx.TimeoutException):
+                raise TorobClientError("torob_timeout", "سرچ تصویری ترب timeout شد.") from exc
+            raise TorobClientError("torob_unavailable", "سرچ تصویری ترب کامل نشد.") from exc
+
+    def _request_headers(self, referer: str = "https://torob.com/") -> dict[str, str]:
+        headers = {
+            "accept": "*/*",
+            "accept-language": "en-US,en;q=0.9,fa;q=0.8",
+            "origin": "https://torob.com",
+            "referer": referer,
+            "sec-ch-ua": '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
+            "sec-ch-ua-mobile": "?1",
+            "sec-ch-ua-platform": '"Android"',
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-site",
+            "user-agent": "Mozilla/5.0 (Linux; Android 13; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36",
+        }
+        if settings.torob_proxy_token:
+            headers["x-proxy-token"] = settings.torob_proxy_token
+        if settings.torob_iw1_header:
+            headers["x-iw1"] = settings.torob_iw1_header
+        if settings.torob_cookie:
+            headers["cookie"] = settings.torob_cookie
+        if settings.torob_csrf_token:
+            headers["x-csrftoken"] = settings.torob_csrf_token
+        return headers
 
     async def _get_client(self, headers: dict[str, str]) -> httpx.AsyncClient:
         if self._client is None:

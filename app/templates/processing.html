@@ -2,7 +2,11 @@
 {% block content %}
 <section class="shell hero">
   <h1>در حال آماده‌سازی محصولات {{ submission.store_name }}</h1>
-  <p>فایل دریافت شد. حالا داریم ردیف‌های اکسل را با محصولات ترب{% if enable_basalam_search %} و باسلام{% endif %} تطبیق می‌دهیم. این صفحه خودش به‌روزرسانی می‌شود.</p>
+  {% if submission.source == "eitaa" %}
+    <p>کانال دریافت شد. حالا داریم پیام‌های قیمت‌دار را می‌خوانیم و با محصولات ترب تطبیق می‌دهیم. این صفحه خودش به‌روزرسانی می‌شود.</p>
+  {% else %}
+    <p>فایل دریافت شد. حالا داریم ردیف‌های اکسل را با محصولات ترب{% if enable_basalam_search %} و باسلام{% endif %} تطبیق می‌دهیم. این صفحه خودش به‌روزرسانی می‌شود.</p>
+  {% endif %}
 </section>
 
 <section class="shell">
@@ -19,7 +23,13 @@
         </p>
       </div>
     {% else %}
-      <div class="hint">در حال پردازش و جستجوی محصولات از ترب{% if enable_basalam_search %} و باسلام{% endif %}.</div>
+      <div class="hint">
+        {% if submission.source == "eitaa" %}
+          در حال خواندن کانال ایتا و جستجوی محصولات در ترب.
+        {% else %}
+          در حال پردازش و جستجوی محصولات از ترب{% if enable_basalam_search %} و باسلام{% endif %}.
+        {% endif %}
+      </div>
     {% endif %}
   </div>
 </section>
