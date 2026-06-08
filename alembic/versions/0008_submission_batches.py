@@ -91,14 +91,16 @@ def _backfill_batches() -> None:
 
     for existing_batch in existing_batches:
         batch_result = connection.execute(
-            submission_batches.insert().values(
+            submission_batches.insert()
+            .values(
                 submission_id=existing_batch.submission_id,
                 status="pending",
                 created_at=existing_batch.submitted_at,
                 updated_at=existing_batch.submitted_at,
             )
+            .returning(submission_batches.c.id)
         )
-        batch_id = batch_result.inserted_primary_key[0]
+        batch_id = batch_result.scalar_one()
         existing_items = connection.execute(
             sa.select(
                 submission_selections.c.row_id,
