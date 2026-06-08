@@ -20,6 +20,7 @@ class UniomClient:
         self.base_url = settings.uniom_base_url.rstrip("/")
         self.token = settings.uniom_bot_token.strip()
         self.timeout = settings.uniom_timeout_seconds
+        self.max_retries = settings.uniom_max_retries
         self._client: httpx.AsyncClient | None = None
 
     async def close(self) -> None:
@@ -41,13 +42,21 @@ class UniomClient:
         return [item for item in result if isinstance(item, dict)]
 
     async def get_chat_history_paginated(self, chat_id: str, total_limit: int, page_size: int) -> list[dict]:
-        page_size = max(1, min(page_size, total_limit))
+        page_size = max(1, min(page_size, 50, total_limit))
+        fallback_page_size = page_size
         messages: list[dict] = []
         seen_message_ids: set[object] = set()
         offset_id: int | None = None
         while len(messages) < total_limit:
-            current_limit = min(page_size, total_limit - len(messages))
-            page = await self.get_chat_history(chat_id, limit=current_limit, offset_id=offset_id)
+            current_limit = min(fallback_page_size, total_limit - len(messages))
+            try:
+                page = await self.get_chat_history(chat_id, limit=current_limit, offset_id=offset_id)
+            except UniomClientError:
+                if fallback_page_size <= 5:
+                    raise
+                fallback_page_size = max(5, fallback_page_size // 2)
+                await asyncio.sleep(0.6)
+                continue
             new_page: list[dict] = []
             for item in page:
                 message_id = item.get("message_id")
@@ -65,6 +74,7 @@ class UniomClient:
             offset_id = min(ids) - 1
             if len(page) < current_limit:
                 break
+            fallback_page_size = min(page_size, fallback_page_size + 5)
             await asyncio.sleep(0.2)
         return messages[:total_limit]
 
@@ -90,21 +100,36 @@ class UniomClient:
         if not self.token:
             raise UniomClientError("uniom_not_configured", "توکن یونیوم تنظیم نشده است.")
         client = await self._get_client()
-        response = await client.get(f"{self.base_url}/bot{self.token}/{method}", params=params)
-        try:
-            response.raise_for_status()
-            data = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            raise UniomClientError("uniom_unavailable", "ارتباط با یونیوم کامل نشد. کمی بعد دوباره تلاش کن.") from exc
-        if not isinstance(data, dict) or data.get("ok") is not True:
-            raise UniomClientError("uniom_bad_response", "یونیوم پاسخ قابل استفاده برنگرداند.")
-        return data
+        last_error: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                response = await client.get(f"{self.base_url}/bot{self.token}/{method}", params=params)
+                if response.status_code in {429, 502, 503, 504}:
+                    raise UniomClientError("uniom_unavailable", "ارتباط با یونیوم کامل نشد. کمی بعد دوباره تلاش کن.")
+                response.raise_for_status()
+                data = response.json()
+            except UniomClientError as exc:
+                last_error = exc
+            except (httpx.TimeoutException, httpx.ConnectError) as exc:
+                last_error = UniomClientError("uniom_unavailable", "ارتباط با یونیوم کامل نشد. کمی بعد دوباره تلاش کن.")
+            except (httpx.HTTPError, ValueError) as exc:
+                raise UniomClientError("uniom_unavailable", "ارتباط با یونیوم کامل نشد. کمی بعد دوباره تلاش کن.") from exc
+            else:
+                if not isinstance(data, dict) or data.get("ok") is not True:
+                    raise UniomClientError("uniom_bad_response", "یونیوم پاسخ قابل استفاده برنگرداند.")
+                return data
+            if attempt < self.max_retries:
+                await asyncio.sleep(min(4.0, 0.7 * (attempt + 1)))
+        if isinstance(last_error, UniomClientError):
+            raise last_error
+        raise UniomClientError("uniom_unavailable", "ارتباط با یونیوم کامل نشد. کمی بعد دوباره تلاش کن.")
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
             self._client = httpx.AsyncClient(
                 timeout=self.timeout,
                 headers={"Accept": "application/json", "User-Agent": "torobjan/0.1"},
+                trust_env=False,
             )
         return self._client
 

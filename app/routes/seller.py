@@ -278,6 +278,9 @@ async def process_eitaa_submission(submission_id: int) -> None:
 
         selected_items: list[tuple[int, int, str]] = []
         image_match_attempts = 0
+        image_matching_blocked = False
+        consecutive_torob_failures = 0
+        torob_stop_message: str | None = None
         for index, draft in enumerate(drafts, start=1):
             row = SubmissionRow(
                 submission_id=submission.id,
@@ -296,12 +299,15 @@ async def process_eitaa_submission(submission_id: int) -> None:
             if (
                 image_bytes
                 and settings.eitaa_image_match_enabled
+                and not image_matching_blocked
                 and image_match_attempts < settings.eitaa_image_match_limit
             ):
                 image_match_attempts += 1
                 try:
                     image_results = await torob.search_by_image_bytes(image_bytes, size=5)
-                except TorobClientError:
+                except TorobClientError as exc:
+                    if _is_blocking_torob_error(exc):
+                        image_matching_blocked = True
                     image_results = []
 
             try:
@@ -309,7 +315,12 @@ async def process_eitaa_submission(submission_id: int) -> None:
             except TorobClientError as exc:
                 row.error_message = _row_torob_error_message(ProductSearchError(exc.code, exc.public_message))
                 db.commit()
+                consecutive_torob_failures += 1
+                if _should_stop_eitaa_torob_search(exc, consecutive_torob_failures):
+                    torob_stop_message = _eitaa_torob_stop_message(exc, len(selected_items))
+                    break
                 continue
+            consecutive_torob_failures = 0
 
             match_by_prk: dict[str, TorobMatch] = {}
             for result in text_results:
@@ -357,7 +368,11 @@ async def process_eitaa_submission(submission_id: int) -> None:
                     )
                 )
         submission.selected_rows = len(selected_items)
-        submission.status = "submitted" if selected_items else "ready"
+        if torob_stop_message:
+            submission.error_message = torob_stop_message
+            submission.status = "submitted" if selected_items else "failed"
+        else:
+            submission.status = "submitted" if selected_items else "ready"
         db.commit()
     except UniomClientError as exc:
         db.rollback()
@@ -442,11 +457,14 @@ def _best_auto_match(
     match_by_prk: dict[str, TorobMatch],
 ) -> tuple[TorobMatch | None, float]:
     image_prks = {result.base_prk for result in image_results[:3]}
+    text_prks = {result.base_prk for result in text_results}
+    candidates: list[tuple[TorobSearchResult, bool]] = [(result, result.base_prk in image_prks) for result in text_results]
+    candidates.extend((result, True) for result in image_results[:3] if result.base_prk not in text_prks)
     best_match: TorobMatch | None = None
     best_score = 0.0
-    for result in text_results:
+    for result, image_hit in candidates:
         score = score_product_match(product_name, result.name)
-        if result.base_prk in image_prks:
+        if image_hit:
             score = min(1.0, score + 0.16)
         if score > best_score:
             best_score = score
@@ -454,6 +472,26 @@ def _best_auto_match(
     if best_match is None or best_score < settings.eitaa_auto_match_threshold:
         return None, best_score
     return best_match, best_score
+
+
+def _is_blocking_torob_error(exc: TorobClientError) -> bool:
+    return exc.code in {"torob_bot_challenge", "torob_forbidden", "torob_rate_limited"}
+
+
+def _should_stop_eitaa_torob_search(exc: TorobClientError, consecutive_failures: int) -> bool:
+    return _is_blocking_torob_error(exc) or consecutive_failures >= 3
+
+
+def _eitaa_torob_stop_message(exc: TorobClientError, selected_count: int) -> str:
+    if _is_blocking_torob_error(exc):
+        return (
+            f"پردازش ایتا متوقف شد چون ترب فعلا درخواست‌های خودکار را تایید نمی‌کند. "
+            f"تا اینجا {selected_count} محصول با مچ مطمئن آماده شده است. کمی بعد دوباره تست کن."
+        )
+    return (
+        f"پردازش ایتا به خاطر چند خطای پشت سر هم در ارتباط با ترب متوقف شد. "
+        f"تا اینجا {selected_count} محصول با مچ مطمئن آماده شده است. کمی بعد دوباره ادامه بده."
+    )
 
 
 def _global_torob_error_message(exc: ProductSearchError) -> str:

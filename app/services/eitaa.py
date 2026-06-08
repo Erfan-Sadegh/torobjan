@@ -43,6 +43,22 @@ NOISE_LINE_PATTERNS = [
         r"پرداخت",
         r"ارسال",
         r"مرجوع",
+        r"فروشگاه\s+کوثر",
+        r"فروش\s+ویژ",
+        r"کالابرگ",
+        r"لیست\s+تره",
+        r"محصولات\s+پروتئینی",
+        r"سبزیجات",
+        r"سیفی",
+        r"میوه",
+        r"شماره\s+تماس",
+        r"وزن\s+محصول",
+        r"وزن\s+جعبه",
+        r"سبد\s+کالا",
+        r"مشاهده\s+موقعیت",
+        r"موقعیت\s+در\s+نقشه",
+        r"به\s+ازای",
+        r"تاریخ\s+روز",
         r"@",
         r"https?://",
     ]
@@ -56,19 +72,25 @@ def extract_eitaa_products(messages: list[dict], max_products: int) -> list[Eita
     for message in sorted(messages, key=lambda item: int(item.get("message_id") or 0), reverse=True):
         text = _message_text(message)
         photos = _message_photos(message)
-        if text and _looks_like_product_text(text):
-            product = _product_from_text(message, text)
-            if product is None:
+        if text:
+            extracted = _products_from_text(message, text)
+            if not extracted:
                 current = None
+            else:
+                if len(extracted) == 1:
+                    extracted[0].photos.extend(photos)
+                    current = extracted[0]
+                else:
+                    current = None
+                remaining = max_products - len(products)
+                products.extend(extracted[:remaining])
+                if len(products) >= max_products:
+                    break
                 continue
-            product.photos.extend(photos)
-            products.append(product)
-            current = product
+        if not text and photos and current is not None and _photo_is_near_product(message, current):
+            current.photos.extend(photos)
             if len(products) >= max_products:
                 break
-            continue
-        if photos and current is not None and _photo_is_near_product(message, current):
-            current.photos.extend(photos)
     return products
 
 
@@ -102,22 +124,78 @@ def _message_photos(message: dict) -> list[EitaaPhoto]:
 
 
 def _looks_like_product_text(text: str) -> bool:
-    return bool(PRICE_PATTERN.search(text))
+    return bool(_extract_product_entries(text))
 
 
-def _product_from_text(message: dict, text: str) -> EitaaProductDraft | None:
-    name = _extract_product_name(text)
-    if not name:
-        return None
-    price = _extract_price_toman(text)
+def _products_from_text(message: dict, text: str) -> list[EitaaProductDraft]:
+    entries = _extract_product_entries(text)
     message_id = str(message.get("message_id") or "").strip()
-    return EitaaProductDraft(
-        message_id=message_id,
-        product_name=name,
-        price_toman=price,
-        description=text,
-        message_date=_to_datetime(message.get("date")),
-    )
+    products: list[EitaaProductDraft] = []
+    for index, (name, price) in enumerate(entries, start=1):
+        products.append(
+            EitaaProductDraft(
+                message_id=message_id if len(entries) == 1 else f"{message_id}:{index}",
+                product_name=name,
+                price_toman=price,
+                description=text,
+                message_date=_to_datetime(message.get("date")),
+            )
+        )
+    return products
+
+
+def _extract_product_entries(text: str) -> list[tuple[str, str | None]]:
+    lines = [_clean_line(line) for line in text.splitlines()]
+    lines = [line for line in lines if line]
+    entries: list[tuple[str, str | None]] = []
+    current_name: str | None = None
+    for line in lines:
+        if _is_noise_line(line):
+            continue
+        direct = _direct_line_entry(line)
+        if direct is not None:
+            entries.append(direct)
+            current_name = None
+            continue
+        price = _context_price(line)
+        if price and current_name:
+            entries.append((current_name, price))
+            current_name = None
+            continue
+        if _looks_like_name_line(line):
+            current_name = line[:500]
+    if not entries:
+        name = _extract_product_name(text)
+        price = _extract_price_toman(text)
+        if name and price:
+            entries.append((name, price))
+    return _dedupe_entries(entries)
+
+
+def _direct_line_entry(line: str) -> tuple[str, str | None] | None:
+    normalized = _normalize_text(line)
+    patterns = [
+        r"^(?P<name>.+?)\s*(?:[:：]|—|ـ{2,}|--+|-)\s*(?P<price>[۰-۹0-9٠-٩][۰-۹0-9٠-٩٬,./\s]*)\s*(?:تومان|تومن|ریال)?\s*$",
+        r"^(?P<name>.+?)\s+(?:کیلویی|کیلو)\s*(?P<price>[۰-۹0-9٠-٩][۰-۹0-9٠-٩٬,./\s]*)\s*(?:تومان|تومن|ریال)?\s*$",
+    ]
+    for pattern in patterns:
+        match = re.match(pattern, normalized, flags=re.IGNORECASE)
+        if not match:
+            continue
+        name = _clean_product_name(match.group("name"))
+        price = _price_fragment_to_toman(match.group("price"), normalized)
+        if name and price:
+            return name, price
+    return None
+
+
+def _context_price(line: str) -> str | None:
+    normalized = _normalize_text(line)
+    if "قیمت بازار" in normalized:
+        return None
+    if any(keyword in normalized for keyword in ["قیمت کوثر", "قیمت محصول", "قیمت هر", "قیمت هرجعبه"]):
+        return _price_fragment_to_toman(normalized, normalized)
+    return None
 
 
 def _extract_product_name(text: str) -> str | None:
@@ -139,15 +217,21 @@ def _extract_price_toman(text: str) -> str | None:
     match = PRICE_PATTERN.search(text)
     if not match:
         return None
-    digits = _digits(match.group(1))
+    return _price_fragment_to_toman(match.group(1), match.group(0))
+
+
+def _price_fragment_to_toman(value: object, context: str) -> str | None:
+    digits = _digits(value)
     if not digits:
         return None
     amount = int(digits)
-    unit = str(match.group(2) or "").strip()
+    unit = str(context or "").strip()
     if amount <= 0:
         return None
     if "ریال" in unit:
         amount = amount // 10
+    elif amount < 10000:
+        amount *= 1000
     return str(amount) if amount > 0 else None
 
 
@@ -169,6 +253,51 @@ def _clean_line(value: str) -> str:
     return text.strip(" -:؛،")
 
 
+def _normalize_text(value: str) -> str:
+    text = value.replace("\u200c", " ")
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _clean_product_name(value: str) -> str | None:
+    text = _clean_line(value)
+    text = re.sub(r"\b(?:کیلو|کیلویی|قیمت|محصول)\b", "", text).strip(" -:؛،")
+    text = re.sub(r"\s+", " ", text)
+    if not text or _is_noise_line(text):
+        return None
+    if len(_tokens(text)) < 1:
+        return None
+    return text[:500]
+
+
+def _is_noise_line(line: str) -> bool:
+    return any(pattern.search(line) for pattern in NOISE_LINE_PATTERNS)
+
+
+def _looks_like_name_line(line: str) -> bool:
+    if _is_noise_line(line):
+        return False
+    if PRICE_PATTERN.search(line):
+        return False
+    if _context_price(line):
+        return False
+    if len(_tokens(line)) < 2 and len(line) < 8:
+        return False
+    return True
+
+
+def _dedupe_entries(entries: list[tuple[str, str | None]]) -> list[tuple[str, str | None]]:
+    deduped: list[tuple[str, str | None]] = []
+    seen: set[tuple[str, str | None]] = set()
+    for name, price in entries:
+        key = (name, price)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append((name, price))
+    return deduped
+
+
 def _digits(value: object) -> str:
     text = str(value or "").translate(PERSIAN_DIGITS)
     return re.sub(r"\D+", "", text)
@@ -184,6 +313,12 @@ def score_product_match(query: str, candidate_name: str) -> float:
     candidate_tokens = _meaningful_tokens(candidate_name)
     if not query_tokens or not candidate_tokens:
         return 0.0
+    candidate_only_blockers = {"بذر", "نهال", "دستگاه", "کتاب", "جزوه", "آموزش", "دانلود"}
+    blocker_overlap = candidate_only_blockers.intersection(candidate_tokens) - set(query_tokens)
+    if blocker_overlap:
+        return 0.0
+    if "خشک" in candidate_tokens and "خشک" not in query_tokens:
+        return 0.0
     candidate_token_set = set(candidate_tokens)
     overlap = [token for token in query_tokens if token in candidate_token_set]
     coverage = len(overlap) / len(query_tokens)
@@ -192,7 +327,10 @@ def score_product_match(query: str, candidate_name: str) -> float:
     ratio = SequenceMatcher(None, joined_query, joined_candidate).ratio()
     substring_boost = 0.14 if joined_query and joined_query in joined_candidate else 0.0
     important_boost = 0.10 if len(overlap) >= min(3, len(query_tokens)) else 0.0
-    return min(1.0, (coverage * 0.62) + (ratio * 0.28) + substring_boost + important_boost)
+    score = min(1.0, (coverage * 0.62) + (ratio * 0.28) + substring_boost + important_boost)
+    if len(candidate_tokens) > max(8, len(query_tokens) * 3) and joined_query not in joined_candidate:
+        score = min(score, 0.68)
+    return score
 
 
 def _meaningful_tokens(value: str) -> list[str]:

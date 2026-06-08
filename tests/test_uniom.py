@@ -1,6 +1,6 @@
 import pytest
 
-from app.services.uniom import UniomClient
+from app.services.uniom import UniomClient, UniomClientError
 
 
 @pytest.mark.asyncio
@@ -23,3 +23,24 @@ async def test_uniom_history_pagination_deduplicates_and_offsets(monkeypatch) ->
 
     assert [item["message_id"] for item in messages] == [120, 119, 118, 117]
     assert calls == [("@regaal", 2, None), ("@regaal", 2, 118), ("@regaal", 1, 116)]
+
+
+@pytest.mark.asyncio
+async def test_uniom_history_pagination_reduces_page_size_on_errors(monkeypatch) -> None:
+    client = UniomClient()
+    calls = []
+
+    async def fake_get_chat_history(chat_id: str, limit: int, offset_id: int | None = None):
+        calls.append((chat_id, limit, offset_id))
+        if limit > 20:
+            raise UniomClientError("uniom_unavailable", "temporary")
+        start = offset_id if offset_id is not None else 120
+        return [{"message_id": start - index} for index in range(limit)]
+
+    monkeypatch.setattr(client, "get_chat_history", fake_get_chat_history)
+
+    messages = await client.get_chat_history_paginated("@kosarmarket", total_limit=40, page_size=50)
+
+    assert len(messages) == 40
+    assert calls[0] == ("@kosarmarket", 40, None)
+    assert calls[1] == ("@kosarmarket", 20, None)

@@ -180,7 +180,7 @@ class TorobClient:
 
     async def _get_client(self, headers: dict[str, str]) -> httpx.AsyncClient:
         if self._client is None:
-            self._client = httpx.AsyncClient(timeout=self.timeout)
+            self._client = httpx.AsyncClient(timeout=self.timeout, trust_env=False)
         return self._client
 
 

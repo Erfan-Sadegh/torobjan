@@ -340,8 +340,9 @@ def _parse_shop_id(value: str | None) -> int | None:
 def _torob_bulk_items(batch: SubmissionBatch) -> tuple[list[TorobBulkAddItem], int]:
     items: list[TorobBulkAddItem] = []
     skipped_count = 0
+    sendable_sources = {"torob", "torob_image"}
     for item in batch.items:
-        if (item.match.source or "torob") != "torob":
+        if (item.match.source or "torob") not in sendable_sources:
             skipped_count += 1
             continue
         price = _parse_positive_int(item.final_price)

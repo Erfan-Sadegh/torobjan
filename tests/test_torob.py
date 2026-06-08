@@ -78,7 +78,7 @@ async def test_torob_client_maps_gateway_404(monkeypatch) -> None:
         async def aclose(self):
             return None
 
-    monkeypatch.setattr("httpx.AsyncClient", lambda timeout: FakeAsyncClient())
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: FakeAsyncClient())
     client = TorobClient()
 
     with pytest.raises(TorobClientError) as exc:
@@ -99,7 +99,7 @@ async def test_torob_client_sends_iw1_header(monkeypatch) -> None:
         async def aclose(self):
             return None
 
-    monkeypatch.setattr("httpx.AsyncClient", lambda timeout: FakeAsyncClient())
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: FakeAsyncClient())
     monkeypatch.setattr("app.services.torob.settings.torob_iw1_header", "test-iw1")
     client = TorobClient()
 
