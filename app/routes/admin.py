@@ -96,6 +96,21 @@ def update_shop_id(
     return RedirectResponse(f"/admin/submissions/{submission_id}", status_code=303)
 
 
+@router.post("/submissions/{submission_id}/rebuild-batch")
+def rebuild_submission_batch(
+    request: Request,
+    submission_id: int,
+    db: Session = Depends(get_db),
+) -> Response:
+    _require_admin(request)
+    submission = _get_submission(db, submission_id)
+    created_count = _create_batch_from_unbatched_selections(db, submission)
+    if created_count <= 0:
+        return _admin_detail_redirect(submission.id, error="انتخاب قابل بازیابی برای ساخت ثبت ارسال پیدا نشد.")
+    db.commit()
+    return _admin_detail_redirect(submission.id, message=f"ثبت ارسال برای {created_count} کالا از انتخاب‌های قبلی ساخته شد.")
+
+
 @router.get("/submissions/{submission_id}/export.xlsx")
 def export_submission(
     request: Request,
@@ -224,11 +239,73 @@ def _visible_batches(submission: Submission) -> list[SubmissionBatch]:
 
 
 def _admin_send_summary(submission: Submission, batches: list[SubmissionBatch]) -> dict[str, int]:
+    unbatched_selection_count = _unbatched_selection_count(submission)
     return {
         "batch_count": len(batches),
         "pending_batch_count": len([batch for batch in batches if batch.status != "sent"]),
         "selection_count": sum(len(row.selections) for row in submission.rows),
+        "unbatched_selection_count": unbatched_selection_count,
     }
+
+
+def _unbatched_selection_count(submission: Submission) -> int:
+    batched_selection_keys = {
+        (item.row_id, item.match_id, str(item.final_price or ""))
+        for batch in submission.batches
+        for item in batch.items
+    }
+    count = 0
+    for row in submission.rows:
+        for selection in row.selections:
+            key = (selection.row_id, selection.match_id, str(selection.final_price or ""))
+            if key not in batched_selection_keys:
+                count += 1
+    return count
+
+
+def _create_batch_from_unbatched_selections(db: Session, submission: Submission) -> int:
+    batched_selection_keys = {
+        (item.row_id, item.match_id, str(item.final_price or ""))
+        for batch in submission.batches
+        for item in batch.items
+    }
+    batch_items = []
+    for row in submission.rows:
+        for selection in row.selections:
+            key = (selection.row_id, selection.match_id, str(selection.final_price or ""))
+            if key in batched_selection_keys:
+                continue
+            if not selection.final_price:
+                continue
+            batch_items.append((row, selection))
+    if not batch_items:
+        return 0
+
+    now = utc_now()
+    batch = SubmissionBatch(
+        submission_id=submission.id,
+        status="pending",
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(batch)
+    db.flush()
+    for row, selection in batch_items:
+        if row.submitted_at is None:
+            row.submitted_at = selection.created_at or now
+        db.add(
+            SubmissionBatchItem(
+                batch_id=batch.id,
+                row_id=row.id,
+                match_id=selection.match_id,
+                final_price=selection.final_price,
+                created_at=selection.created_at or now,
+            )
+        )
+    submission.selected_rows = sum(len(row.selections) for row in submission.rows)
+    if submission.status != "submitted":
+        submission.status = "submitted"
+    return len(batch_items)
 
 
 def _get_batch(submission: Submission, batch_id: int) -> SubmissionBatch:
