@@ -93,3 +93,25 @@ def test_extract_eitaa_products_prefers_contextual_store_price() -> None:
     assert len(products) == 1
     assert products[0].product_name == "پوشک مولفیکس سایز 4/3/2/1"
     assert products[0].price_toman == "136000"
+
+
+def test_extract_eitaa_products_keeps_product_name_across_price_detail_lines() -> None:
+    messages = [
+        {
+            "message_id": 5260,
+            "date": 1755439769,
+            "text": """تخم مرغ فله درجه یک
+
+درشت بار، سالم، یکدست
+تاریخ روز
+شانه ۳۰ عددی 👉 کیلویی «۱۹۹»
+قیمت هر شانه حدود ۴۰۰ تومن
+""",
+        }
+    ]
+
+    products = extract_eitaa_products(messages, max_products=10)
+
+    assert len(products) == 1
+    assert products[0].product_name == "تخم مرغ فله درجه یک"
+    assert products[0].price_toman == "400000"

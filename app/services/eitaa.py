@@ -46,6 +46,7 @@ NOISE_LINE_PATTERNS = [
         r"فروشگاه\s+کوثر",
         r"فروش\s+ویژ",
         r"کالابرگ",
+        r"فعال",
         r"لیست\s+تره",
         r"محصولات\s+پروتئینی",
         r"سبزیجات",
@@ -59,6 +60,14 @@ NOISE_LINE_PATTERNS = [
         r"موقعیت\s+در\s+نقشه",
         r"به\s+ازای",
         r"تاریخ\s+روز",
+        r"درشت\s+بار",
+        r"سالم",
+        r"یکدست",
+        r"ارزان",
+        r"فوق\s+العاده",
+        r"کیفیت",
+        r"در\s+دو\s+نوع",
+        r"^در\s+سایز",
         r"@",
         r"https?://",
     ]
@@ -281,9 +290,21 @@ def _looks_like_name_line(line: str) -> bool:
         return False
     if _context_price(line):
         return False
+    if _looks_like_price_detail_line(line):
+        return False
     if len(_tokens(line)) < 2 and len(line) < 8:
         return False
     return True
+
+
+def _looks_like_price_detail_line(line: str) -> bool:
+    normalized = _normalize_text(line)
+    if not _digits(normalized):
+        return False
+    return bool(
+        re.search(r"(?:کیلویی|کیلو|شانه|جعبه|بسته|گرم|عدد)", normalized)
+        and re.search(r"(?:تومان|تومن|ریال|[۰-۹0-9٠-٩])", normalized)
+    )
 
 
 def _dedupe_entries(entries: list[tuple[str, str | None]]) -> list[tuple[str, str | None]]:
