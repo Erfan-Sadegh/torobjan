@@ -914,8 +914,13 @@ def test_continue_submission_hides_submitted_rows_and_shows_resume_card(monkeypa
 
     home = client.get("/")
     assert home.status_code == 200
-    assert "انتخاب محصولات فروشگاه تست ناتمام مانده" in home.text
-    assert "2 ردیف هنوز مانده" in home.text
+    assert "انتخاب محصولات فروشگاه تست ناتمام مانده" not in home.text
+    assert 'href="/excel"' in home.text
+
+    excel_page = client.get("/excel")
+    assert excel_page.status_code == 200
+    assert "انتخاب محصولات فروشگاه تست ناتمام مانده" in excel_page.text
+    assert "2 ردیف هنوز مانده" in excel_page.text
 
     second_confirm = client.post(
         f"/submissions/{submission_id}/confirm",
@@ -1174,7 +1179,16 @@ def test_index_has_loading_submit_state() -> None:
     app = create_app()
     client = TestClient(app)
 
-    response = client.get("/")
+    home = client.get("/")
+
+    assert home.status_code == 200
+    assert 'href="/excel"' in home.text
+    assert 'href="/eitaa"' in home.text
+    assert "upload-form" not in home.text
+    assert "وارد کردن دسته جمعی محصولات به ترب، برای فروشندگان حضوری" in home.text
+    assert "آیدی کانالت را بده" in home.text
+
+    response = client.get("/excel")
 
     assert response.status_code == 200
     assert "upload-form" in response.text
@@ -1184,7 +1198,7 @@ def test_index_has_loading_submit_state() -> None:
     assert "در حال پردازش فایل" in response.text
     assert "fetch(form.action" in response.text
     assert "شماره موبایل، اختیاری" in response.text
-    assert "وارد کردن دسته جمعی محصولات به ترب، برای فروشندگان حضوری" in response.text
+    assert "وارد کردن محصولات با فایل اکسل" in response.text
     assert "این نسخه آزمایشی هست؛ لطفا شمارت رو بذار" in response.text
     assert "clarity.ms/tag" not in response.text
 

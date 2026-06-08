@@ -34,11 +34,16 @@ class SelectionSaveResult:
 
 
 @router.get("/")
-def index(request: Request, db: Session = Depends(get_db)) -> Response:
+def index(request: Request) -> Response:
+    return templates.TemplateResponse(request, "index.html")
+
+
+@router.get("/excel")
+def excel_page(request: Request, db: Session = Depends(get_db)) -> Response:
     draft_submission, draft_remaining_count = _get_resume_state(db, request.cookies.get(SELLER_DRAFT_COOKIE))
     return templates.TemplateResponse(
         request,
-        "index.html",
+        "excel.html",
         {
             "draft_submission": draft_submission,
             "draft_remaining_count": draft_remaining_count,
@@ -93,14 +98,14 @@ async def upload_products(
     if not store_name:
         return templates.TemplateResponse(
             request,
-            "index.html",
+            "excel.html",
             {"error": "نام فروشگاه الزامی است."},
             status_code=400,
         )
     if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
         return templates.TemplateResponse(
             request,
-            "index.html",
+            "excel.html",
             {"error": "فقط فایل xls یا xlsx قابل قبول است."},
             status_code=400,
         )
@@ -111,7 +116,7 @@ async def upload_products(
     except ExcelParseError as exc:
         return templates.TemplateResponse(
             request,
-            "index.html",
+            "excel.html",
             {"error": str(exc)},
             status_code=400,
         )
@@ -129,7 +134,7 @@ async def upload_products(
         db.rollback()
         return templates.TemplateResponse(
             request,
-            "index.html",
+            "excel.html",
             {"error": "دیتابیس محلی موقتا قفل است. اگر سرور قبلی باز مانده، آن را ببند و دوباره تلاش کن."},
             status_code=503,
         )

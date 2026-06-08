@@ -328,6 +328,21 @@ input[type="file"] {
   font-weight: 800;
 }
 
+.processing-note.compact {
+  padding: 8px 10px;
+  background: #fff;
+}
+
+.processing-note.compact span {
+  width: 24px;
+  height: 24px;
+}
+
+.processing-note.compact p {
+  font-weight: 500;
+  color: var(--muted);
+}
+
 .file-picker {
   position: relative;
   min-width: 0;

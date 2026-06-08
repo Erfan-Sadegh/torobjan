@@ -2,6 +2,7 @@
 {% block content %}
 <section class="shell hero">
   <h1>وارد کردن محصولات از کانال ایتا</h1>
+  <p>آیدی کانالت را بده؛ پیام‌های قیمت‌دار خوانده می‌شود و محصولاتی که با اطمینان بالا در ترب پیدا شوند، برای ثبت آماده می‌شوند.</p>
 </section>
 
 <section class="shell">
@@ -25,8 +26,8 @@
     </div>
     <div class="field">
       <label for="channel_id">آیدی کانال ایتا</label>
-      <input id="channel_id" name="channel_id" type="text" required dir="ltr" value="{{ channel_id or '' }}" placeholder="@regaal">
-      <div class="hint">فعلا پیام‌های اخیر کانال خوانده می‌شود؛ محصول‌ها باید در متن پیام قیمت داشته باشند.</div>
+      <input id="channel_id" name="channel_id" type="text" required dir="ltr" value="{{ channel_id or '' }}" placeholder="@kosarmarket">
+      <div class="hint">اگر پیام عکس داشته باشد، برای تطبیق بهتر هم از عکس کمک می‌گیریم. قیمت باید در متن پیام قابل تشخیص باشد.</div>
     </div>
     <div class="processing-note">
       <span aria-hidden="true">☕</span>

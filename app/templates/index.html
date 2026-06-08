@@ -5,17 +5,8 @@
 </section>
 
 <section class="shell">
-  {% if draft_submission %}
-    <div class="resume-card">
-      <div class="resume-copy">
-        <strong>انتخاب محصولات {{ draft_submission.store_name }} ناتمام مانده</strong>
-        <span>{{ draft_remaining_count }} ردیف هنوز مانده. هرچه محصول بیشتری اضافه کنی، بیشتر دیده می‌شی و مشتری بیشتری می‌گیری.</span>
-      </div>
-      <a class="btn" href="/submissions/{{ draft_submission.id }}/match">ادامه انتخاب محصولات</a>
-    </div>
-  {% endif %}
   <div class="import-choice-grid">
-    <a class="import-choice-card" href="#excel-import">
+    <a class="import-choice-card" href="/excel">
       <span class="import-choice-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24">
           <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"></path>
@@ -25,7 +16,7 @@
         </svg>
       </span>
       <strong>آپلود فایل اکسل</strong>
-      <span>فایل محصولات را بده و محصول درست را از ترب انتخاب کن.</span>
+      <span>فایل محصولات را بده، محصول درست را انتخاب کن و دسته‌جمعی برای ترب آماده کن.</span>
     </a>
     <a class="import-choice-card" href="/eitaa">
       <span class="import-choice-icon" aria-hidden="true">
@@ -36,123 +27,8 @@
         </svg>
       </span>
       <strong>کانال ایتا</strong>
-      <span>محصولات قیمت‌دار کانالت را می‌خوانیم و با ترب تطبیق می‌دهیم.</span>
+      <span>آیدی کانالت را بده؛ محصولات قیمت‌دار را می‌خوانیم و موارد مطمئن را برای ترب آماده می‌کنیم.</span>
     </a>
   </div>
-  <div class="section-actions">
-    <a class="btn secondary subtle" href="/template.xlsx">دانلود قالب اکسل</a>
-    <span class="help-tip" tabindex="0" aria-label="راهنمای فایل اکسل">
-      <svg aria-hidden="true" viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="9"></circle>
-        <path d="M9.8 9.5a2.3 2.3 0 0 1 4.4.8c0 1.7-2.2 1.9-2.2 3.4"></path>
-        <path d="M12 17h.01"></path>
-      </svg>
-      <span class="help-content">
-        فایل‌های xls و xlsx پشتیبانی می‌شوند. ستون نام کالا می‌تواند «نام کالا»، «نام محصول»، «محصول» یا product_name باشد. ستون قیمت هم می‌تواند «قیمت» یا price باشد.
-      </span>
-    </span>
-  </div>
-  <form id="excel-import" class="panel grid upload-form" action="/uploads" method="post" enctype="multipart/form-data">
-    {% if error %}
-      <div class="error">{{ error }}</div>
-    {% endif %}
-    <div class="form-grid grid">
-      <div class="field">
-        <label for="store_name">نام فروشگاه</label>
-        <input id="store_name" name="store_name" type="text" required placeholder="مثلا سوپرمارکت بهار">
-      </div>
-      <div class="field">
-        <label for="seller_phone">شماره موبایل، اختیاری</label>
-        <input id="seller_phone" name="seller_phone" type="text" inputmode="tel" placeholder="مثلا ۰۹۱۲۱۲۳۴۵۶۷">
-        <div class="hint">این نسخه آزمایشی هست؛ لطفا شمارت رو بذار اگر مشکلی پیش اومد باهات تماس بگیریم.</div>
-      </div>
-    </div>
-    <div class="field">
-      <label for="file">فایل اکسل محصولات</label>
-      <div class="file-picker">
-        <input id="file" name="file" type="file" accept=".xls,.xlsx" required>
-        <label class="file-drop" for="file">
-          <span class="file-drop-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24">
-              <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"></path>
-              <path d="M14 3v5h5"></path>
-              <path d="M8 13h8"></path>
-              <path d="M8 17h5"></path>
-            </svg>
-          </span>
-          <span>
-            <span class="file-drop-title" data-file-title>فایل اکسل را انتخاب کن</span>
-            <span class="file-drop-subtitle" data-file-subtitle>هنوز فایلی انتخاب نشده است.</span>
-          </span>
-        </label>
-      </div>
-    </div>
-    <div>
-      <button class="btn submit-btn" type="submit">
-        <span class="idle-label">شروع تطبیق محصولات</span>
-        <span class="loading-label">در حال پردازش فایل...</span>
-      </button>
-    </div>
-  </form>
 </section>
-<script>
-  document.querySelectorAll(".upload-form").forEach((form) => {
-    const fileInput = form.querySelector('input[type="file"]');
-    const filePicker = form.querySelector(".file-picker");
-    const fileTitle = form.querySelector("[data-file-title]");
-    const fileSubtitle = form.querySelector("[data-file-subtitle]");
-    if (fileInput && filePicker && fileTitle && fileSubtitle) {
-      fileInput.addEventListener("change", () => {
-        const fileName = fileInput.files && fileInput.files.length ? fileInput.files[0].name : "";
-        filePicker.classList.toggle("has-file", Boolean(fileName));
-        filePicker.classList.remove("needs-file");
-        fileTitle.textContent = fileName || "فایل اکسل را انتخاب کن";
-        fileSubtitle.textContent = fileName ? "فایل آپلود شد." : "هنوز فایلی انتخاب نشده است.";
-        form.querySelectorAll(".file-error").forEach((item) => item.remove());
-      });
-    }
-
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      form.querySelectorAll(".file-error").forEach((item) => item.remove());
-      if (fileInput && (!fileInput.files || !fileInput.files.length)) {
-        if (filePicker) filePicker.classList.add("needs-file");
-        const error = document.createElement("div");
-        error.className = "error file-error";
-        error.textContent = "برای شروع، فایل اکسل محصولات را انتخاب کن.";
-        if (filePicker) {
-          filePicker.after(error);
-        } else {
-          form.prepend(error);
-        }
-        return;
-      }
-      const button = form.querySelector(".submit-btn");
-      if (button) {
-        button.disabled = true;
-        button.classList.add("is-loading");
-      }
-      try {
-        const response = await fetch(form.action, {
-          method: "POST",
-          body: new FormData(form),
-          headers: { "X-Requested-With": "fetch" }
-        });
-        const html = await response.text();
-        document.open();
-        document.write(html);
-        document.close();
-      } catch {
-        if (button) {
-          button.disabled = false;
-          button.classList.remove("is-loading");
-        }
-        const error = document.createElement("div");
-        error.className = "error";
-        error.textContent = "ارتباط با سرور قطع شد. دوباره تلاش کن.";
-        form.prepend(error);
-      }
-    });
-  });
-</script>
 {% endblock %}
