@@ -638,7 +638,7 @@ def processing_status(request: Request, submission_id: int, db: Session = Depend
             if row.input_product_name and (row.error_message or row.matches)
         ]
     )
-    progress_percent = int((processed_count / total_count) * 100) if total_count else 100
+    progress_percent = int((processed_count / total_count) * 100) if total_count else 0
     return templates.TemplateResponse(
         request,
         "partials/processing_status.html",

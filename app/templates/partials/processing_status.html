@@ -1,8 +1,21 @@
 <div id="processing-state" class="panel">
-  <div class="progress-title">{{ processed_count }} از {{ total_count }} ردیف پردازش شده</div>
-  <div class="progress-bar">
-    <span style="width: {{ progress_percent }}%"></span>
-  </div>
+  {% if total_count %}
+    <div class="progress-title">{{ processed_count }} از {{ total_count }} ردیف پردازش شده</div>
+    <div class="progress-bar">
+      <span style="width: {{ progress_percent }}%"></span>
+    </div>
+  {% else %}
+    <div class="progress-title">
+      {% if submission.source == "eitaa" %}
+        در حال خواندن پیام‌های کانال ایتا...
+      {% else %}
+        در حال آماده‌سازی فایل...
+      {% endif %}
+    </div>
+    <div class="progress-bar is-indeterminate" aria-hidden="true">
+      <span></span>
+    </div>
+  {% endif %}
   {% if total_count > 150 %}
     <div class="processing-note">
       <span aria-hidden="true">☕</span>

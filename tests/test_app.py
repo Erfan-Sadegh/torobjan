@@ -1175,6 +1175,45 @@ def test_eitaa_import_auto_matches_and_creates_admin_batch(monkeypatch, tmp_path
     assert "nike-voodoo" not in detail.text
 
 
+def test_eitaa_processing_status_is_indeterminate_before_rows_are_known(tmp_path) -> None:
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    db_path = tmp_path / "test.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(bind=engine)
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    with TestingSessionLocal() as db:
+        submission = Submission(
+            store_name="فروشگاه تست",
+            source="eitaa",
+            source_ref="@kosarmarket",
+            status="processing",
+        )
+        db.add(submission)
+        db.commit()
+        submission_id = submission.id
+
+    app = create_app()
+    app.dependency_overrides[get_db] = override_get_db
+    client = TestClient(app)
+
+    status = client.get(f"/submissions/{submission_id}/processing-status")
+
+    assert status.status_code == 200
+    assert "در حال خواندن پیام‌های کانال ایتا" in status.text
+    assert "0 از 0" not in status.text
+    assert "is-indeterminate" in status.text
+
+
 def test_eitaa_import_keeps_no_price_products_for_seller_review(monkeypatch, tmp_path) -> None:
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker

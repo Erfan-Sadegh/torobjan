@@ -622,6 +622,23 @@ input[type="file"] {
   transition: width 240ms ease;
 }
 
+.progress-bar.is-indeterminate span {
+  width: 38%;
+  animation: progress-slide 1.25s ease-in-out infinite;
+}
+
+@keyframes progress-slide {
+  0% {
+    transform: translateX(170%);
+  }
+  50% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-170%);
+  }
+}
+
 .inline-actions {
   justify-content: flex-start;
   margin: 14px 0 0;
