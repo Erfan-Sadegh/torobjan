@@ -39,6 +39,7 @@ NOISE_LINE_PATTERNS = [
         r"ثبت\s+سفارش",
         r"ارتباط",
         r"آدرس",
+        r"ساعت\s+کاری",
         r"سایت",
         r"پرداخت",
         r"ارسال",
@@ -82,7 +83,7 @@ def extract_eitaa_products(messages: list[dict], max_products: int) -> list[Eita
         text = _message_text(message)
         photos = _message_photos(message)
         if text:
-            extracted = _products_from_text(message, text)
+            extracted = _products_from_text(message, text, allow_missing_price=bool(photos))
             if not extracted:
                 current = None
             else:
@@ -136,8 +137,8 @@ def _looks_like_product_text(text: str) -> bool:
     return bool(_extract_product_entries(text))
 
 
-def _products_from_text(message: dict, text: str) -> list[EitaaProductDraft]:
-    entries = _extract_product_entries(text)
+def _products_from_text(message: dict, text: str, allow_missing_price: bool = False) -> list[EitaaProductDraft]:
+    entries = _extract_product_entries(text, allow_missing_price=allow_missing_price)
     message_id = str(message.get("message_id") or "").strip()
     products: list[EitaaProductDraft] = []
     for index, (name, price) in enumerate(entries, start=1):
@@ -153,7 +154,7 @@ def _products_from_text(message: dict, text: str) -> list[EitaaProductDraft]:
     return products
 
 
-def _extract_product_entries(text: str) -> list[tuple[str, str | None]]:
+def _extract_product_entries(text: str, allow_missing_price: bool = False) -> list[tuple[str, str | None]]:
     lines = [_clean_line(line) for line in text.splitlines()]
     lines = [line for line in lines if line]
     entries: list[tuple[str, str | None]] = []
@@ -176,7 +177,7 @@ def _extract_product_entries(text: str) -> list[tuple[str, str | None]]:
     if not entries:
         name = _extract_product_name(text)
         price = _extract_price_toman(text)
-        if name and price:
+        if name and (price or allow_missing_price and _looks_like_missing_price_product(name, text)):
             entries.append((name, price))
     return _dedupe_entries(entries)
 
@@ -218,7 +219,7 @@ def _extract_product_name(text: str) -> str | None:
             continue
         if len(_tokens(line)) < 2 and len(line) < 8:
             continue
-        return line[:500]
+        return _clean_product_name(line)
     return None
 
 
@@ -270,6 +271,8 @@ def _normalize_text(value: str) -> str:
 
 def _clean_product_name(value: str) -> str | None:
     text = _clean_line(value)
+    text = re.sub(r"^نام\s+محصول\s*:?\s*#?", "", text, flags=re.IGNORECASE)
+    text = text.replace("#", "").replace("_", " ")
     text = re.sub(r"\b(?:کیلو|کیلویی|قیمت|محصول)\b", "", text).strip(" -:؛،")
     text = re.sub(r"\s+", " ", text)
     if not text or _is_noise_line(text):
@@ -305,6 +308,40 @@ def _looks_like_price_detail_line(line: str) -> bool:
         re.search(r"(?:کیلویی|کیلو|شانه|جعبه|بسته|گرم|عدد)", normalized)
         and re.search(r"(?:تومان|تومن|ریال|[۰-۹0-9٠-٩])", normalized)
     )
+
+
+def _looks_like_missing_price_product(name: str, text: str) -> bool:
+    tokens = _tokens(name)
+    if len(tokens) < 2 or len(tokens) > 10:
+        return False
+    normalized_name = _normalize_text(name)
+    reject_patterns = [
+        r"قم|پردیسان|بلوار|خیابان|میدان|کوچه|آدرس",
+        r"ساعت\s+کاری|امروز|فردا|جمعه|شنبه|یکشنبه|دوشنبه|سه\s*شنبه|چهارشنبه|پنجشنبه",
+        r"ایام|امام|الله|علی|عید|شهادت|تسلیت|مبارک|ماه\s+محرم|ماه\s+رمضان",
+        r"فروشگاه|آنتیک\s+جهان|ثبت\s+سفارش|شماره\s+تماس|دسته\s*بندی|»",
+    ]
+    if any(re.search(pattern, normalized_name) for pattern in reject_patterns):
+        return False
+    generic_tokens = {
+        "بسیار",
+        "خوش",
+        "رخ",
+        "باهیب",
+        "باهیبت",
+        "باهبت",
+        "ایتالیایی",
+        "مارک",
+        "دار",
+        "فعال",
+        "کمیاب",
+        "زیبا",
+        "تمیز",
+        "سالم",
+    }
+    if len(tokens) <= 4 and set(tokens).issubset(generic_tokens):
+        return False
+    return True
 
 
 def _dedupe_entries(entries: list[tuple[str, str | None]]) -> list[tuple[str, str | None]]:

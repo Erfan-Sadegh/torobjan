@@ -115,3 +115,51 @@ def test_extract_eitaa_products_keeps_product_name_across_price_detail_lines() -
     assert len(products) == 1
     assert products[0].product_name == "تخم مرغ فله درجه یک"
     assert products[0].price_toman == "400000"
+
+
+def test_extract_eitaa_products_keeps_photo_product_without_price_for_review() -> None:
+    messages = [
+        {
+            "message_id": 5250,
+            "date": 1755439769,
+            "text": """روغن جامد لادن
+
+در دو نوع طلایی و آبی
+در سایزهای ۹۰۰ گرم و ۲۷۰۰ گرم
+به تعداد محدود شارژ شدن
+""",
+            "photo": [{"file_id": "oil-photo", "width": 900, "height": 900}],
+        },
+        {
+            "message_id": 5249,
+            "date": 1755439700,
+            "text": "متن معرفی کانال بدون قیمت",
+        },
+    ]
+
+    products = extract_eitaa_products(messages, max_products=10)
+
+    assert len(products) == 1
+    assert products[0].product_name == "روغن جامد لادن"
+    assert products[0].price_toman is None
+    assert products[0].best_photo.file_id == "oil-photo"
+
+
+def test_extract_eitaa_products_cleans_hashtag_product_names() -> None:
+    messages = [
+        {
+            "message_id": 5240,
+            "date": 1755439769,
+            "text": """نام محصول: #شامپو_نارگیل
+
+قیمت: ۱۰۴۰۰۰ تومان
+""",
+            "photo": [{"file_id": "shampoo", "width": 700, "height": 700}],
+        }
+    ]
+
+    products = extract_eitaa_products(messages, max_products=10)
+
+    assert len(products) == 1
+    assert products[0].product_name == "شامپو نارگیل"
+    assert products[0].price_toman == "104000"

@@ -1175,6 +1175,105 @@ def test_eitaa_import_auto_matches_and_creates_admin_batch(monkeypatch, tmp_path
     assert "nike-voodoo" not in detail.text
 
 
+def test_eitaa_import_keeps_no_price_products_for_seller_review(monkeypatch, tmp_path) -> None:
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    class NoPriceUniomClient(FakeUniomClient):
+        async def get_chat_history(self, chat_id: str, limit: int, offset_id: int | None = None) -> list[dict]:
+            return [
+                {
+                    "message_id": 21,
+                    "date": 1755439679,
+                    "text": "روغن جامد لادن\r\nدر دو نوع طلایی و آبی\r\nبه تعداد محدود شارژ شدن",
+                    "photo": [{"file_id": "oil-photo", "width": 900, "height": 900}],
+                }
+            ]
+
+        async def get_file(self, file_id: str):
+            return SimpleNamespace(file_id=file_id, file_path="files/oil.jpg")
+
+    class NoPriceTorobClient(FakeEitaaTorobClient):
+        async def search_base_products(self, query: str, size: int = 5, page: int = 0) -> list[TorobSearchResult]:
+            return [
+                TorobSearchResult(
+                    rank=0,
+                    base_prk="laden-oil",
+                    name="روغن جامد لادن طلایی ۹۰۰ گرم",
+                    price=240000,
+                    price_text="از ۲۴۰٬۰۰۰ تومان",
+                    image_url="https://image.example/oil.jpg",
+                    product_url="https://torob.com/p/laden-oil",
+                    is_already_added=False,
+                )
+            ]
+
+    db_path = tmp_path / "test.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(bind=engine)
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    monkeypatch.setattr("app.routes.seller.SessionLocal", TestingSessionLocal)
+    monkeypatch.setattr("app.routes.seller.UniomClient", NoPriceUniomClient)
+    monkeypatch.setattr("app.routes.seller.TorobClient", NoPriceTorobClient)
+    monkeypatch.setattr("app.routes.seller.settings.uniom_bot_token", "test-token")
+    monkeypatch.setattr("app.routes.seller.settings.upload_dir", str(tmp_path / "uploads"))
+
+    app = create_app()
+    app.dependency_overrides[get_db] = override_get_db
+    client = TestClient(app)
+
+    response = client.post(
+        "/eitaa/import",
+        data={"store_name": "فروشگاه ایتا", "seller_phone": "", "channel_id": "kosarmarket"},
+    )
+    assert response.status_code == 200
+
+    with TestingSessionLocal() as db:
+        submission = db.query(Submission).first()
+        assert submission is not None
+        assert submission.status == "ready"
+        assert submission.total_rows == 1
+        assert submission.selected_rows == 0
+        row = submission.rows[0]
+        assert row.input_product_name == "روغن جامد لادن"
+        assert row.input_price is None
+        assert row.final_price is None
+        assert row.error_message is None
+        assert row.matches[0].base_prk == "laden-oil"
+        submission_id = submission.id
+        row_id = row.id
+        match_id = row.matches[0].id
+
+    summary = client.get(f"/submissions/{submission_id}/eitaa-summary")
+    assert summary.status_code == 200
+    assert "1 محصول قیمت نداشتند" in summary.text
+    assert "تکمیل محصولات بدون قیمت" in summary.text
+
+    match_page = client.get(f"/submissions/{submission_id}/match")
+    assert match_page.status_code == 200
+    assert "روغن جامد لادن طلایی ۹۰۰ گرم" in match_page.text
+    assert f'name="price_{row_id}"' in match_page.text
+
+    confirm = client.post(
+        f"/submissions/{submission_id}/confirm",
+        data={f"selected_{row_id}": str(match_id), f"price_{row_id}": "245000", "price_unit": "toman"},
+    )
+    assert confirm.status_code == 200
+    with TestingSessionLocal() as db:
+        submission = db.query(Submission).first()
+        assert submission.selected_rows == 1
+        assert submission.rows[0].final_price == "245000"
+        assert len(submission.batches) == 1
+
+
 def test_index_has_loading_submit_state() -> None:
     app = create_app()
     client = TestClient(app)

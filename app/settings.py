@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     eitaa_history_page_size: int = Field(default=50, ge=1, le=50)
     eitaa_max_products: int = Field(default=400, ge=1, le=500)
     eitaa_image_match_enabled: bool = True
-    eitaa_image_match_limit: int = Field(default=100, ge=0, le=300)
+    eitaa_image_match_limit: int = Field(default=300, ge=0, le=300)
     eitaa_auto_match_threshold: float = Field(default=0.84, ge=0, le=1)
 
     torob_base_url: str = "https://api.torob.com"

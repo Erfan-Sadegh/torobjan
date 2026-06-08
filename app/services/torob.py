@@ -146,6 +146,7 @@ class TorobClient:
             if _is_bot_challenge(search):
                 raise TorobClientError("torob_bot_challenge", "سرچ تصویری ترب تایید نشد.")
             search.raise_for_status()
+            await asyncio.sleep(self.rate_limit_seconds)
             return parse_search_results(search.json(), size=size)
         except TorobClientError:
             raise

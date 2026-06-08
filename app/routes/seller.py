@@ -286,6 +286,7 @@ async def process_eitaa_submission(submission_id: int) -> None:
         image_matching_blocked = False
         consecutive_torob_failures = 0
         torob_stop_message: str | None = None
+        text_search_cache: dict[str, list[TorobSearchResult]] = {}
         for index, draft in enumerate(drafts, start=1):
             row = SubmissionRow(
                 submission_id=submission.id,
@@ -316,7 +317,7 @@ async def process_eitaa_submission(submission_id: int) -> None:
                     image_results = []
 
             try:
-                text_results = await torob.search_base_products(draft.product_name, size=6)
+                text_results = await _search_eitaa_text_results(torob, draft.product_name, text_search_cache)
             except TorobClientError as exc:
                 row.error_message = _row_torob_error_message(ProductSearchError(exc.code, exc.public_message))
                 db.commit()
@@ -339,8 +340,10 @@ async def process_eitaa_submission(submission_id: int) -> None:
             db.flush()
             selected_match, score = _best_auto_match(draft.product_name, text_results, image_results, match_by_prk)
             row.auto_match_score = int(score * 100)
-            if not draft.price_toman:
-                row.error_message = "قیمت محصول در متن کانال پیدا نشد."
+            if not match_by_prk:
+                row.error_message = "محصول در ترب پیدا نشد."
+            elif not draft.price_toman:
+                row.error_message = None
             elif selected_match is None:
                 row.error_message = "تطبیق مطمئن با محصول ترب پیدا نشد؛ این مورد برای ارسال خودکار آماده نشد."
             else:
@@ -479,6 +482,52 @@ def _best_auto_match(
     return best_match, best_score
 
 
+async def _search_eitaa_text_results(
+    torob: TorobClient,
+    product_name: str,
+    cache: dict[str, list[TorobSearchResult]],
+) -> list[TorobSearchResult]:
+    combined: list[TorobSearchResult] = []
+    seen_prks: set[str] = set()
+    for index, query in enumerate(_eitaa_search_queries(product_name)):
+        if query not in cache:
+            cache[query] = await torob.search_base_products(query, size=6)
+        results = cache[query]
+        for result in results:
+            if result.base_prk in seen_prks:
+                continue
+            seen_prks.add(result.base_prk)
+            combined.append(result)
+        if index == 0 and _best_eitaa_text_score(product_name, combined) >= settings.eitaa_auto_match_threshold:
+            break
+    return combined[:8]
+
+
+def _eitaa_search_queries(product_name: str) -> list[str]:
+    base = _clean_eitaa_query(product_name)
+    variants = [base]
+    broader = re.sub(
+        r"\b(?:درجه|یک|تازه|نو|پاک\s*شده|فله|بسته|کیلویی|کیلو|گرمی|گرم|عدد|عددی|شانه)\b",
+        " ",
+        base,
+    )
+    broader = _clean_eitaa_query(broader)
+    if broader and broader != base and len(broader.split()) >= 2:
+        variants.append(broader)
+    return variants
+
+
+def _clean_eitaa_query(value: str) -> str:
+    text = value.replace("ـ", "")
+    text = re.sub(r"[^\wآ-ی۰-۹0-9]+", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _best_eitaa_text_score(product_name: str, results: list[TorobSearchResult]) -> float:
+    return max((score_product_match(product_name, result.name) for result in results), default=0.0)
+
+
 def _is_blocking_torob_error(exc: TorobClientError) -> bool:
     return exc.code in {"torob_bot_challenge", "torob_forbidden", "torob_rate_limited"}
 
@@ -608,6 +657,12 @@ def eitaa_summary(request: Request, submission_id: int, db: Session = Depends(ge
     if submission.source != "eitaa":
         return Response(status_code=303, headers={"Location": f"/submissions/{submission.id}/match"})
     matched_count = sum(len(row.selections) for row in submission.rows)
+    needs_price_rows = [
+        row
+        for row in submission.rows
+        if row.input_product_name and row.matches and not row.selections and not row.error_message and not row.input_price
+    ]
+    needs_price_count = len(needs_price_rows)
     needs_review_count = len([row for row in submission.rows if row.input_product_name and not row.selections])
     response = templates.TemplateResponse(
         request,
@@ -615,6 +670,7 @@ def eitaa_summary(request: Request, submission_id: int, db: Session = Depends(ge
         {
             "submission": submission,
             "matched_count": matched_count,
+            "needs_price_count": needs_price_count,
             "needs_review_count": needs_review_count,
         },
     )
