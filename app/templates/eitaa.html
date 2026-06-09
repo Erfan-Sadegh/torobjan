@@ -10,7 +10,11 @@
     <div class="resume-card">
       <div class="resume-copy">
         <strong>بررسی محصولات {{ draft_submission.store_name }} ناتمام مانده</strong>
-        <span>{{ draft_remaining_count }} محصول هنوز مانده. هرچه محصول بیشتری اضافه کنی، بیشتر دیده می‌شی و مشتری بیشتری می‌گیری.</span>
+        {% if draft_remaining_count %}
+          <span>{{ draft_remaining_count }} محصول نیازمند بررسی مانده. هرچه محصول بیشتری اضافه کنی، بیشتر دیده می‌شی و مشتری بیشتری می‌گیری.</span>
+        {% else %}
+          <span>محصولات آماده تاییدند. برای ثبت نهایی، ادامه بده.</span>
+        {% endif %}
       </div>
       <a class="btn" href="/submissions/{{ draft_submission.id }}/match">ادامه بررسی محصولات</a>
     </div>

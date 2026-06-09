@@ -1336,6 +1336,68 @@ def test_eitaa_processing_status_is_indeterminate_before_rows_are_known(tmp_path
     assert "is-indeterminate" in status.text
 
 
+def test_eitaa_processing_status_uses_known_total_rows(tmp_path) -> None:
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    db_path = tmp_path / "test.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(bind=engine)
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    with TestingSessionLocal() as db:
+        submission = Submission(
+            store_name="فروشگاه تست",
+            source="eitaa",
+            source_ref="@timanic_shop",
+            status="processing",
+            total_rows=400,
+        )
+        db.add(submission)
+        db.commit()
+        db.refresh(submission)
+        for index in range(1, 9):
+            row = SubmissionRow(
+                submission_id=submission.id,
+                input_row=index,
+                input_product_name=f"محصول {index}",
+            )
+            db.add(row)
+            db.flush()
+            db.add(
+                TorobMatch(
+                    row_id=row.id,
+                    source="torob",
+                    rank=0,
+                    base_prk=f"base-{index}",
+                    name=f"محصول {index}",
+                    price=100000,
+                    image_url=None,
+                    product_url=None,
+                    is_already_added=False,
+                )
+            )
+        db.commit()
+        submission_id = submission.id
+
+    app = create_app()
+    app.dependency_overrides[get_db] = override_get_db
+    client = TestClient(app)
+
+    status = client.get(f"/submissions/{submission_id}/processing-status")
+
+    assert status.status_code == 200
+    assert "8 از 400 ردیف پردازش شده" in status.text
+    assert "8 از 8" not in status.text
+
+
 def test_eitaa_import_keeps_no_price_products_for_seller_review(monkeypatch, tmp_path) -> None:
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
@@ -1559,7 +1621,75 @@ def test_eitaa_preview_groups_review_rows_and_supports_continue(monkeypatch, tmp
 
     eitaa_page = client.get("/eitaa")
     assert "بررسی محصولات فروشگاه ایتا ناتمام مانده" in eitaa_page.text
-    assert "1 محصول هنوز مانده" in eitaa_page.text
+    assert "1 محصول نیازمند بررسی مانده" in eitaa_page.text
+
+
+def test_eitaa_resume_card_counts_review_rows_not_ready_rows(tmp_path) -> None:
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    db_path = tmp_path / "test.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(bind=engine)
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    with TestingSessionLocal() as db:
+        submission = Submission(
+            store_name="تست تست",
+            source="eitaa",
+            source_ref="@timanic_shop",
+            status="ready",
+            total_rows=400,
+        )
+        db.add(submission)
+        db.commit()
+        db.refresh(submission)
+        for index in range(1, 401):
+            row = SubmissionRow(
+                submission_id=submission.id,
+                input_row=index,
+                input_product_name=f"محصول {index}",
+                input_price="100000",
+                final_price="100000" if index <= 148 else None,
+            )
+            db.add(row)
+            db.flush()
+            match = TorobMatch(
+                row_id=row.id,
+                source="torob",
+                rank=0,
+                base_prk=f"base-{index}",
+                name=f"محصول {index}",
+                price=100000,
+                image_url=None,
+                product_url=None,
+                is_already_added=False,
+            )
+            db.add(match)
+            db.flush()
+            if index <= 148:
+                row.selected_match_id = match.id
+                db.add(SubmissionSelection(row_id=row.id, match_id=match.id, final_price="100000"))
+        db.commit()
+        submission_id = submission.id
+
+    app = create_app()
+    app.dependency_overrides[get_db] = override_get_db
+    client = TestClient(app)
+    client.cookies.set("torobjan_latest_submission", str(submission_id))
+
+    response = client.get("/eitaa")
+
+    assert response.status_code == 200
+    assert "252 محصول نیازمند بررسی مانده" in response.text
+    assert "400 محصول" not in response.text
 
 
 def test_index_has_loading_submit_state() -> None:

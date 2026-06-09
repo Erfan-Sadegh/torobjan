@@ -317,6 +317,7 @@ async def process_eitaa_submission(submission_id: int) -> None:
         )
         drafts = extract_eitaa_products(messages, max_products=settings.eitaa_max_products)
         submission.total_rows = len(drafts)
+        db.commit()
         if not drafts:
             submission.status = "failed"
             submission.error_message = "در پیام‌های اخیر کانال، محصول قیمت‌دار قابل پردازش پیدا نشد."
@@ -696,7 +697,7 @@ def processing_status(request: Request, submission_id: int, db: Session = Depend
             {"submission": submission},
             headers={"X-Processing-State": "failed"},
         )
-    total_count = (
+    total_count = submission.total_rows if submission.source == "eitaa" and submission.total_rows else (
         db.query(SubmissionRow)
         .filter(SubmissionRow.submission_id == submission.id, SubmissionRow.input_product_name.isnot(None))
         .count()
@@ -1090,9 +1091,19 @@ def _get_resume_state(db: Session, cookie_value: str | None, source: str = "exce
         return None, 0
     if submission.source != source or submission.status != "ready":
         return None, 0
-    remaining_count = _remaining_selectable_count(submission)
-    if remaining_count <= 0:
+    remaining_selectable_count = _remaining_selectable_count(submission)
+    if remaining_selectable_count <= 0:
         return None, 0
+    if source == "eitaa":
+        remaining_count = len(
+            [
+                row
+                for row in _visible_selection_rows(submission)
+                if row.input_product_name and not _is_eitaa_ready_row(row)
+            ]
+        )
+        return submission, remaining_count
+    remaining_count = remaining_selectable_count
     return submission, remaining_count
 
 
