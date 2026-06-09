@@ -50,7 +50,7 @@
         data-draft-url="/submissions/{{ submission.id }}/draft"
         data-submission-id="{{ submission.id }}"
         data-source="{{ submission.source }}"
-        data-submit-label="{{ 'تایید و آماده‌سازی' if is_eitaa else 'ثبت' }}">
+        data-submit-label="{{ 'تایید و ثبت' if is_eitaa else 'ثبت' }}">
     <input type="hidden" name="price_unit" value="{{ submission.price_unit or '' }}" data-price-unit-value>
     <input type="hidden" name="finish_mode" value="complete" data-finish-mode>
     {% if valid_count %}
@@ -58,7 +58,7 @@
         <div class="progress-note">
           <span class="note-sticker" aria-hidden="true">☕</span>
           {% if is_eitaa %}
-            <p>اول موارد نیازمند بررسی را کامل کن؛ اگر قیمت پیدا نشده واردش کن، اگر مچ مطمئن نبوده محصول درست را تیک بزن. انتخاب‌ها ذخیره می‌شوند.</p>
+            <p>اول موارد نیازمند بررسی را کامل کن؛ اگر قیمت پیدا نشده واردش کن، اگر تطبیق با ترب مطمئن نبوده محصول درست را تیک بزن. انتخاب‌ها ذخیره می‌شوند.</p>
           {% else %}
             <p>هر تعدادی که انتخاب کردی رو می‌تونی ثبت کنی و هر وقت فرصت داشتی ادامه بدی. انتخاب‌ها ذخیره می‌شود.</p>
           {% endif %}
@@ -73,11 +73,11 @@
             <h2>نیازمند بررسی</h2>
             <p>
               {% if eitaa_missing_price_count and eitaa_needs_match_count %}
-                بعضی محصولات قیمت ندارند و بعضی مچ مطمئن نداشتند.
+                بعضی محصولات قیمت ندارند و بعضی تطبیق مطمئن با ترب نداشتند.
               {% elif eitaa_missing_price_count %}
                 این موارد قیمت قابل تشخیص نداشتند؛ قیمت را وارد کن و محصول درست را تیک بزن.
               {% elif eitaa_needs_match_count %}
-                برای این موارد مچ مطمئن نبود؛ اگر محصول درست است تیک بزن.
+                برای این موارد تطبیق با ترب مطمئن نبود؛ اگر محصول درست است تیک بزن.
               {% else %}
                 این موارد هنوز آماده تایید نیستند؛ پیام هر ردیف را ببین.
               {% endif %}
@@ -112,7 +112,7 @@
         <span>انتخاب‌شده از {{ parseable_count if is_eitaa else valid_count }} ردیف</span>
         <small data-draft-state>انتخاب‌ها ذخیره می‌شود</small>
       </div>
-      <button class="btn" type="submit" data-submit-button>{{ "تایید و آماده‌سازی" if is_eitaa else "ثبت" }} 0 محصول انتخاب شده</button>
+      <button class="btn" type="submit" data-submit-button>{{ "تایید و ثبت" if is_eitaa else "ثبت" }} 0 محصول انتخاب شده</button>
     </div>
   </form>
   <div class="modal-backdrop" data-confirm-modal hidden>
@@ -121,7 +121,7 @@
       <h2 id="confirm-title">{{ "باقی محصولات را بعدا بررسی می‌کنی؟" if is_eitaa else "با باقی محصولات چه کار کنیم؟" }}</h2>
       <p>
         {% if is_eitaa %}
-          می‌تونی همین انتخاب‌ها را آماده کنی و محصولات بدون تیک را بعدا بررسی کنی؛ یا اگر باقی موارد را نمی‌خواهی، همین مرحله را نهایی کن.
+          می‌تونی همین انتخاب‌ها را ثبت کنی و محصولات بدون تیک را بعدا بررسی کنی؛ یا اگر باقی موارد را نمی‌خواهی، همین مرحله را نهایی کن.
         {% else %}
           می‌تونی همین انتخاب‌ها رو ثبت کنی و بعدا ادامه بدی، یا اگر باقی محصولات موجود نیستند همین مرحله را نهایی کنی.
         {% endif %}
@@ -158,6 +158,7 @@
   const submitLabel = matchForm ? matchForm.dataset.submitLabel : "ثبت";
   const validRowCount = {{ (parseable_count if is_eitaa else valid_count) or 0 }};
   const breakHintKey = matchForm ? `torobjan-break-hint:${matchForm.dataset.submissionId}` : "";
+  let breakHintBaseline = 0;
   let draftTimer = null;
   let draftController = null;
   if (document.querySelector("[data-price-unit-value]")?.value) {
@@ -166,7 +167,8 @@
     });
   }
 
-  function updateSelectionSummary() {
+  function updateSelectionSummary(options = {}) {
+    const allowBreakHint = options.allowBreakHint !== false;
     const selectedCount = getSelectedProductCount();
     document.querySelectorAll("[data-selected-count]").forEach((item) => {
       item.textContent = selectedCount;
@@ -178,7 +180,9 @@
     document.querySelectorAll(".sticky-submit").forEach((item) => {
       item.classList.toggle("has-selection", selectedCount > 0);
     });
-    maybeShowBreakHint(selectedCount);
+    if (allowBreakHint) {
+      maybeShowBreakHint(selectedCount);
+    }
     return selectedCount;
   }
 
@@ -192,7 +196,8 @@
 
   function maybeShowBreakHint(selectedCount) {
     const modal = document.querySelector("[data-rest-modal]");
-    if (!modal || !breakHintKey || selectedCount < 50 || localStorage.getItem(breakHintKey)) return;
+    const threshold = breakHintBaseline + 50;
+    if (!modal || !breakHintKey || selectedCount < threshold || localStorage.getItem(breakHintKey)) return;
     localStorage.setItem(breakHintKey, "shown");
     modal.hidden = false;
   }
@@ -365,6 +370,6 @@
     alert.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
-  updateSelectionSummary();
+  breakHintBaseline = updateSelectionSummary({ allowBreakHint: false });
 </script>
 {% endblock %}

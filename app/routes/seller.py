@@ -26,6 +26,30 @@ templates = create_templates()
 INITIAL_MATCH_COUNT = 4
 MATCH_BATCH_PER_SOURCE = 2
 SELLER_DRAFT_COOKIE = "torobjan_latest_submission"
+EITAA_DB_COMMIT_EVERY = 8
+EITAA_CANDIDATE_MIN_SCORE = 0.30
+EITAA_CANDIDATE_QUALIFIERS = {
+    "درجه",
+    "یک",
+    "تازه",
+    "نو",
+    "پاک",
+    "شده",
+    "فله",
+    "بسته",
+    "کیلویی",
+    "کیلو",
+    "گرمی",
+    "گرم",
+    "عدد",
+    "عددی",
+    "شانه",
+    "بزرگ",
+    "کوچک",
+    "متوسط",
+    "ممتاز",
+    "اعلا",
+}
 
 
 @dataclass(frozen=True)
@@ -369,7 +393,8 @@ async def process_eitaa_submission(submission_id: int) -> None:
                 db.flush()
             elif selected_match is None and draft.price_toman:
                 row.error_message = None
-            db.commit()
+            if index % EITAA_DB_COMMIT_EVERY == 0:
+                db.commit()
 
         if torob_stop_message:
             submission.error_message = torob_stop_message
@@ -512,6 +537,8 @@ async def _search_eitaa_text_results(
             cache[query] = await torob.search_base_products(query, size=6)
         results = cache[query]
         for result in results:
+            if not _is_plausible_eitaa_candidate(product_name, result):
+                continue
             if result.base_prk in seen_prks:
                 continue
             seen_prks.add(result.base_prk)
@@ -546,6 +573,27 @@ def _best_eitaa_text_score(product_name: str, results: list[TorobSearchResult]) 
     return max((score_product_match(product_name, result.name) for result in results), default=0.0)
 
 
+def _is_plausible_eitaa_candidate(product_name: str, result: TorobSearchResult) -> bool:
+    query_tokens = set(_eitaa_candidate_tokens(product_name))
+    if not query_tokens:
+        return True
+    candidate_tokens = set(_eitaa_candidate_tokens(result.name))
+    if query_tokens.intersection(candidate_tokens):
+        return True
+    if len(query_tokens) <= 2:
+        return False
+    return score_product_match(product_name, result.name) >= EITAA_CANDIDATE_MIN_SCORE
+
+
+def _eitaa_candidate_tokens(value: str) -> list[str]:
+    tokens: list[str] = []
+    for token in _clean_eitaa_query(value).lower().split():
+        if token.isdigit() or len(token) <= 1 or token in EITAA_CANDIDATE_QUALIFIERS:
+            continue
+        tokens.append(token)
+    return tokens
+
+
 def _is_blocking_torob_error(exc: TorobClientError) -> bool:
     return exc.code in {"torob_bot_challenge", "torob_forbidden", "torob_rate_limited"}
 
@@ -558,11 +606,11 @@ def _eitaa_torob_stop_message(exc: TorobClientError, selected_count: int) -> str
     if _is_blocking_torob_error(exc):
         return (
             f"پردازش ایتا متوقف شد چون ترب فعلا درخواست‌های خودکار را تایید نمی‌کند. "
-            f"تا اینجا {selected_count} محصول با مچ مطمئن آماده شده است. کمی بعد دوباره تست کن."
+            f"تا اینجا {selected_count} محصول با تطبیق مطمئن با ترب آماده شده است. کمی بعد دوباره تست کن."
         )
     return (
         f"پردازش ایتا به خاطر چند خطای پشت سر هم در ارتباط با ترب متوقف شد. "
-        f"تا اینجا {selected_count} محصول با مچ مطمئن آماده شده است. کمی بعد دوباره ادامه بده."
+        f"تا اینجا {selected_count} محصول با تطبیق مطمئن با ترب آماده شده است. کمی بعد دوباره ادامه بده."
     )
 
 

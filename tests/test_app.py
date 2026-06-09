@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 from openpyxl import Workbook, load_workbook
 
@@ -286,6 +287,19 @@ class FakeEitaaTorobClient:
 
     async def close(self) -> None:
         return None
+
+
+def make_torob_result(base_prk: str, name: str, price: int = 100000) -> TorobSearchResult:
+    return TorobSearchResult(
+        rank=0,
+        base_prk=base_prk,
+        name=name,
+        price=price,
+        price_text=None,
+        image_url=None,
+        product_url=f"https://torob.com/p/{base_prk}",
+        is_already_added=False,
+    )
 
 
 def test_upload_confirm_admin_export(monkeypatch, tmp_path) -> None:
@@ -1167,7 +1181,7 @@ def test_eitaa_import_auto_matches_and_waits_for_seller_preview(monkeypatch, tmp
     assert f'value="{match_id}" checked' in match_page.text
     assert 'value="668,000"' in match_page.text
     assert "قیمت‌ها ریال هست یا تومان؟" not in match_page.text
-    assert "تایید و آماده‌سازی" in match_page.text
+    assert "تایید و ثبت" in match_page.text
 
     confirm = client.post(
         f"/submissions/{submission_id}/confirm",
@@ -1246,6 +1260,41 @@ def test_eitaa_image_download_failure_does_not_fail_processing(monkeypatch, tmp_
         assert row.source_image_path is None
         assert row.matches
         assert row.selections
+
+
+@pytest.mark.asyncio
+async def test_eitaa_text_search_filters_unrelated_short_query_results() -> None:
+    from app.routes.seller import _search_eitaa_text_results
+
+    class ProduceTorobClient:
+        async def search_base_products(self, query: str, size: int = 5, page: int = 0) -> list[TorobSearchResult]:
+            return [
+                make_torob_result("papaya", "پاپایا درجه یک بسته ای", 595000),
+                make_torob_result("potato", "سیب زمینی درجه یک یک کیلوگرم", 50000),
+                make_torob_result("lettuce", "کاهو فرانسوی درجه یک بسته ای", 95000),
+                make_torob_result("cucumber", "خیار گلخانه ای ممتاز یک کیلویی", 125000),
+            ]
+
+    results = await _search_eitaa_text_results(ProduceTorobClient(), "خیار درجه یک", {})
+
+    assert [item.base_prk for item in results] == ["cucumber"]
+
+
+@pytest.mark.asyncio
+async def test_eitaa_text_search_keeps_related_product_variants() -> None:
+    from app.routes.seller import _search_eitaa_text_results
+
+    class CabbageTorobClient:
+        async def search_base_products(self, query: str, size: int = 5, page: int = 0) -> list[TorobSearchResult]:
+            return [
+                make_torob_result("white-cabbage", "کلم سفید درجه یک", 45000),
+                make_torob_result("red-cabbage", "کلم قرمز درجه یک", 45000),
+                make_torob_result("lettuce", "کاهو رسمی پاک شده", 75000),
+            ]
+
+    results = await _search_eitaa_text_results(CabbageTorobClient(), "کلم سفید و قرمز", {})
+
+    assert [item.base_prk for item in results] == ["white-cabbage", "red-cabbage"]
 
 
 def test_eitaa_processing_status_is_indeterminate_before_rows_are_known(tmp_path) -> None:
@@ -1477,6 +1526,7 @@ def test_eitaa_preview_groups_review_rows_and_supports_continue(monkeypatch, tmp
     assert "1 محصول آماده تایید است و 1 محصول نیاز به بررسی دارد" in match_page.text
     assert "نیازمند بررسی" in match_page.text
     assert "آماده تایید" in match_page.text
+    assert "مچ" not in match_page.text
     assert "محصول 1 کانال" in match_page.text
     assert "محصول کانال 1" not in match_page.text
     assert "قیمت از کانال تشخیص داده نشد" in match_page.text

@@ -164,7 +164,10 @@ def _extract_product_entries(text: str, allow_missing_price: bool = False) -> li
             continue
         direct = _direct_line_entry(line)
         if direct is not None:
-            entries.append(direct)
+            name, price = direct
+            if current_name and _is_packaging_detail_name(name):
+                name = f"{current_name} {name}"
+            entries.append((name, price))
             current_name = None
             continue
         price = _context_price(line)
@@ -185,7 +188,7 @@ def _extract_product_entries(text: str, allow_missing_price: bool = False) -> li
 def _direct_line_entry(line: str) -> tuple[str, str | None] | None:
     normalized = _normalize_text(line)
     patterns = [
-        r"^(?P<name>.+?)\s*(?:[:：]|—|ـ{2,}|--+|-)\s*(?P<price>[۰-۹0-9٠-٩][۰-۹0-9٠-٩٬,./\s]*)\s*(?:تومان|تومن|ریال)?\s*$",
+        r"^(?P<name>.+?)\s*(?:[:：]|—|ـ{2,}|--+|-|_)\s*(?P<price>[۰-۹0-9٠-٩][۰-۹0-9٠-٩٬,./\s]*)\s*(?:تومان|تومن|ریال)?\s*$",
         r"^(?P<name>.+?)\s+(?:کیلویی|کیلو)\s*(?P<price>[۰-۹0-9٠-٩][۰-۹0-9٠-٩٬,./\s]*)\s*(?:تومان|تومن|ریال)?\s*$",
     ]
     for pattern in patterns:
@@ -197,6 +200,14 @@ def _direct_line_entry(line: str) -> tuple[str, str | None] | None:
         if name and price:
             return name, price
     return None
+
+
+def _is_packaging_detail_name(name: str) -> bool:
+    tokens = _tokens(name)
+    if not tokens:
+        return False
+    packaging_tokens = {"شانه", "بسته", "جعبه", "عدد", "عددی", "کارتن", "دانه", "کیلویی", "کیلو", "گرمی", "گرم"}
+    return set(tokens).issubset(packaging_tokens) or tokens[0] in {"شانه", "بسته", "جعبه", "کارتن"}
 
 
 def _context_price(line: str) -> str | None:

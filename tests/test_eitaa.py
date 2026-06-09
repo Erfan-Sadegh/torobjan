@@ -163,3 +163,40 @@ def test_extract_eitaa_products_cleans_hashtag_product_names() -> None:
     assert len(products) == 1
     assert products[0].product_name == "شامپو نارگیل"
     assert products[0].price_toman == "104000"
+
+
+def test_extract_eitaa_products_keeps_context_for_plain_packaging_price_lines() -> None:
+    messages = [
+        {
+            "message_id": 5261,
+            "date": 1755439769,
+            "text": """تخم مرغ فله درجه یک
+
+درشت بار، سالم، یکدست
+شانه ۳۰ عددی کیلویی ۱۹۹
+""",
+        }
+    ]
+
+    products = extract_eitaa_products(messages, max_products=10)
+
+    assert [(item.product_name, item.price_toman) for item in products] == [
+        ("تخم مرغ فله درجه یک شانه ۳۰ عددی", "199000")
+    ]
+
+
+def test_extract_eitaa_products_reads_underscore_price_list_lines() -> None:
+    messages = [
+        {
+            "message_id": 5283,
+            "date": 1755439769,
+            "text": "سبزیجات\nکلم سفید و قرمز _ ۴۵\nخیار درجه یک _ ۹۵",
+        }
+    ]
+
+    products = extract_eitaa_products(messages, max_products=10)
+
+    assert [(item.product_name, item.price_toman) for item in products] == [
+        ("کلم سفید و قرمز", "45000"),
+        ("خیار درجه یک", "95000"),
+    ]
