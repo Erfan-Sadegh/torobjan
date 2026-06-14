@@ -228,6 +228,29 @@ async def torob_health(request: Request) -> Response:
     )
 
 
+@router.get("/torob-bulk-health")
+async def torob_bulk_health(request: Request) -> Response:
+    _require_admin(request)
+    client = TorobBulkAddClient()
+    try:
+        result = await client.health_check()
+    finally:
+        await client.close()
+
+    bulk_key_state = "set" if settings.torob_bulk_add_key else "empty"
+    iw1_state = "set" if settings.torob_iw1_header else "empty"
+    lines = [
+        "OK" if result.outcome in {"reachable", "auth_rejected"} else f"FAILED: {result.outcome}",
+        f"TOROB_BULK_ADD_URL={settings.torob_bulk_add_url}",
+        f"TOROB_BULK_ADD_KEY={bulk_key_state}",
+        f"TOROB_IW1_HEADER={iw1_state}",
+        f"status_code={result.status_code}",
+        f"detail={result.detail}",
+    ]
+    status_code = 200 if result.outcome in {"reachable", "auth_rejected"} else 503
+    return Response("\n".join(lines), status_code=status_code, media_type="text/plain; charset=utf-8")
+
+
 def _require_admin(request: Request) -> None:
     cookie = request.cookies.get(ADMIN_COOKIE)
     if not cookie or not hmac.compare_digest(cookie, settings.session_secret):
@@ -362,6 +385,8 @@ def _parse_positive_int(value: object) -> int | None:
 
 
 def _bulk_add_error_text(exc: TorobBulkAddError) -> str:
+    if exc.code == "bot_challenge":
+        return exc.public_message
     if exc.status_code:
         return f"{exc.public_message} ({exc.status_code})"
     return exc.public_message

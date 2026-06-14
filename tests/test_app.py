@@ -236,6 +236,18 @@ class FakeTorobBulkAddClient:
         return None
 
 
+class FakeReachableTorobBulkHealthClient:
+    async def health_check(self):
+        return SimpleNamespace(
+            status_code=400,
+            outcome="reachable",
+            detail="endpoint bulk-add بدون چالش ربات پاسخ داد.",
+        )
+
+    async def close(self) -> None:
+        return None
+
+
 class FakeUniomClient:
     async def get_chat(self, chat_id: str) -> dict:
         return {"id": 1, "type": "channel", "username": chat_id.removeprefix("@")}
@@ -678,6 +690,27 @@ def test_admin_torob_health_reports_timeout(monkeypatch) -> None:
     assert health.status_code == 503
     assert "torob_timeout" in health.text
     assert "VPN" in health.text
+
+
+def test_admin_torob_bulk_health_reports_reachable(monkeypatch) -> None:
+    monkeypatch.setattr("app.routes.admin.TorobBulkAddClient", FakeReachableTorobBulkHealthClient)
+    monkeypatch.setattr("app.routes.admin.settings.admin_password", "secret")
+    monkeypatch.setattr("app.routes.admin.settings.session_secret", "test-cookie")
+    monkeypatch.setattr("app.routes.admin.settings.torob_bulk_add_key", "bulk-key")
+    monkeypatch.setattr("app.routes.admin.settings.torob_iw1_header", "iw1")
+
+    app = create_app()
+    client = TestClient(app)
+
+    login = client.post("/admin/login", data={"password": "secret"}, follow_redirects=False)
+    assert login.status_code == 303
+
+    health = client.get("/admin/torob-bulk-health")
+
+    assert health.status_code == 200
+    assert "OK" in health.text
+    assert "TOROB_IW1_HEADER=set" in health.text
+    assert "TOROB_BULK_ADD_KEY=set" in health.text
 
 
 def test_retry_row_search_replaces_error_with_results(monkeypatch, tmp_path) -> None:

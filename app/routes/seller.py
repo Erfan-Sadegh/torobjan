@@ -66,6 +66,16 @@ class EitaaImageSearchOutcome:
     error: TorobClientError | None = None
 
 
+@dataclass(frozen=True)
+class EitaaMatchOutcome:
+    index: int
+    row: SubmissionRow
+    draft: EitaaProductDraft
+    text_results: list[TorobSearchResult]
+    image_outcome: EitaaImageSearchOutcome
+    torob_error: TorobClientError | None = None
+
+
 @router.get("/")
 def index(request: Request) -> Response:
     return templates.TemplateResponse(request, "index.html")
@@ -324,11 +334,8 @@ async def process_eitaa_submission(submission_id: int) -> None:
             db.commit()
             return
 
-        image_match_attempts = 0
-        image_matching_blocked = False
-        consecutive_torob_failures = 0
-        torob_stop_message: str | None = None
-        text_search_cache: dict[str, list[TorobSearchResult]] = {}
+        prefetched_images = await _prefetch_eitaa_images(uniom, drafts)
+        rows_by_index: dict[int, SubmissionRow] = {}
         for index, draft in enumerate(drafts, start=1):
             row = SubmissionRow(
                 submission_id=submission.id,
@@ -339,63 +346,95 @@ async def process_eitaa_submission(submission_id: int) -> None:
                 source_message_id=draft.message_id,
             )
             db.add(row)
-            db.flush()
+            rows_by_index[index] = row
+        db.flush()
 
-            image_task: asyncio.Task[EitaaImageSearchOutcome] | None = None
-            if (
-                draft.best_photo
-                and settings.eitaa_image_match_enabled
-                and not image_matching_blocked
-                and image_match_attempts < settings.eitaa_image_match_limit
-            ):
-                image_task = asyncio.create_task(_search_eitaa_image_results(uniom, torob, row, draft))
+        image_match_attempts = 0
+        image_matching_blocked = False
+        consecutive_torob_failures = 0
+        torob_stop_message: str | None = None
+        text_search_cache: dict[str, list[TorobSearchResult]] = {}
+        cache_lock = asyncio.Lock()
+        chunk_size = settings.eitaa_concurrency
 
-            try:
-                text_results = await _search_eitaa_text_results(torob, draft.product_name, text_search_cache)
-            except TorobClientError as exc:
-                image_outcome = await _finish_eitaa_image_task(image_task)
-                if image_outcome.attempted:
+        for chunk_start in range(0, len(drafts), chunk_size):
+            chunk = list(enumerate(drafts[chunk_start:chunk_start + chunk_size], start=chunk_start + 1))
+            chunk_outcomes = await asyncio.gather(
+                *[
+                    _match_eitaa_draft(
+                        index=index,
+                        draft=draft,
+                        row=rows_by_index[index],
+                        uniom=uniom,
+                        torob=torob,
+                        prefetched_images=prefetched_images,
+                        text_search_cache=text_search_cache,
+                        cache_lock=cache_lock,
+                        image_match_attempts=image_match_attempts,
+                        image_matching_blocked=image_matching_blocked,
+                    )
+                    for index, draft in chunk
+                ]
+            )
+            for outcome in sorted(chunk_outcomes, key=lambda item: item.index):
+                if outcome.image_outcome.attempted:
                     image_match_attempts += 1
-                if image_outcome.error and _is_blocking_torob_error(image_outcome.error):
+                if outcome.image_outcome.error and _is_blocking_torob_error(outcome.image_outcome.error):
                     image_matching_blocked = True
-                row.error_message = _row_torob_error_message(ProductSearchError(exc.code, exc.public_message))
-                db.commit()
-                consecutive_torob_failures += 1
-                if _should_stop_eitaa_torob_search(exc, consecutive_torob_failures):
-                    torob_stop_message = _eitaa_torob_stop_message(exc, _count_submission_selections(db, submission.id))
-                    break
-                continue
-            consecutive_torob_failures = 0
-            image_outcome = await _finish_eitaa_image_task(image_task)
-            if image_outcome.attempted:
-                image_match_attempts += 1
-            if image_outcome.error and _is_blocking_torob_error(image_outcome.error):
-                image_matching_blocked = True
-            image_results = image_outcome.results
 
-            match_by_prk: dict[str, TorobMatch] = {}
-            for result in text_results:
-                match = _append_single_torob_match(row, result, source="torob")
-                match_by_prk[match.base_prk] = match
-            for result in image_results:
-                if result.base_prk not in match_by_prk:
-                    match = _append_single_torob_match(row, result, source="torob_image")
+                if outcome.torob_error is not None:
+                    outcome.row.error_message = _row_torob_error_message(
+                        ProductSearchError(outcome.torob_error.code, outcome.torob_error.public_message)
+                    )
+                    consecutive_torob_failures += 1
+                    db.commit()
+                    if _should_stop_eitaa_torob_search(outcome.torob_error, consecutive_torob_failures):
+                        torob_stop_message = _eitaa_torob_stop_message(
+                            outcome.torob_error,
+                            _count_submission_selections(db, submission.id),
+                        )
+                        break
+                    continue
+
+                consecutive_torob_failures = 0
+                image_results = outcome.image_outcome.results
+                match_by_prk: dict[str, TorobMatch] = {}
+                for result in outcome.text_results:
+                    match = _append_single_torob_match(outcome.row, result, source="torob")
                     match_by_prk[match.base_prk] = match
+                for result in image_results:
+                    if result.base_prk not in match_by_prk:
+                        match = _append_single_torob_match(outcome.row, result, source="torob_image")
+                        match_by_prk[match.base_prk] = match
 
-            db.flush()
-            selected_match, score = _best_auto_match(draft.product_name, text_results, image_results, match_by_prk)
-            row.auto_match_score = int(score * 100)
-            if not match_by_prk:
-                row.error_message = "محصول در ترب پیدا نشد."
-            elif selected_match is not None and draft.price_toman:
-                row.selected_match_id = selected_match.id
-                row.final_price = draft.price_toman
-                db.add(SubmissionSelection(row_id=row.id, match_id=selected_match.id, final_price=draft.price_toman))
                 db.flush()
-            elif selected_match is None and draft.price_toman:
-                row.error_message = None
-            if index % EITAA_DB_COMMIT_EVERY == 0:
-                db.commit()
+                selected_match, score = _best_auto_match(
+                    outcome.draft.product_name,
+                    outcome.text_results,
+                    image_results,
+                    match_by_prk,
+                )
+                outcome.row.auto_match_score = int(score * 100)
+                if not match_by_prk:
+                    outcome.row.error_message = "محصول در ترب پیدا نشد."
+                elif selected_match is not None and outcome.draft.price_toman:
+                    outcome.row.selected_match_id = selected_match.id
+                    outcome.row.final_price = outcome.draft.price_toman
+                    db.add(
+                        SubmissionSelection(
+                            row_id=outcome.row.id,
+                            match_id=selected_match.id,
+                            final_price=outcome.draft.price_toman,
+                        )
+                    )
+                    db.flush()
+                elif selected_match is None and outcome.draft.price_toman:
+                    outcome.row.error_message = None
+                if outcome.index % EITAA_DB_COMMIT_EVERY == 0:
+                    db.commit()
+
+            if torob_stop_message:
+                break
 
         if torob_stop_message:
             submission.error_message = torob_stop_message
@@ -478,13 +517,104 @@ def _append_matches(db: Session, row: SubmissionRow, results) -> int:
     return added_count
 
 
+async def _prefetch_eitaa_images(uniom: UniomClient, drafts: list[EitaaProductDraft]) -> dict[int, bytes]:
+    prefetched: dict[int, bytes] = {}
+    if not settings.eitaa_image_match_enabled:
+        return prefetched
+
+    targets: list[tuple[int, EitaaProductDraft]] = []
+    for index, draft in enumerate(drafts, start=1):
+        if draft.best_photo is None:
+            continue
+        if len(targets) >= settings.eitaa_image_match_limit:
+            break
+        targets.append((index, draft))
+
+    semaphore = asyncio.Semaphore(settings.eitaa_image_prefetch_concurrency)
+
+    async def fetch_one(index: int, draft: EitaaProductDraft) -> None:
+        photo = draft.best_photo
+        if photo is None:
+            return
+        async with semaphore:
+            try:
+                file_info = await uniom.get_file(photo.file_id)
+                prefetched[index] = await uniom.download_file(file_info.file_path)
+            except UniomClientError:
+                return
+
+    await asyncio.gather(*(fetch_one(index, draft) for index, draft in targets))
+    return prefetched
+
+
+async def _match_eitaa_draft(
+    index: int,
+    draft: EitaaProductDraft,
+    row: SubmissionRow,
+    uniom: UniomClient,
+    torob: TorobClient,
+    prefetched_images: dict[int, bytes],
+    text_search_cache: dict[str, list[TorobSearchResult]],
+    cache_lock: asyncio.Lock,
+    image_match_attempts: int,
+    image_matching_blocked: bool,
+) -> EitaaMatchOutcome:
+    image_task: asyncio.Task[EitaaImageSearchOutcome] | None = None
+    if (
+        draft.best_photo
+        and settings.eitaa_image_match_enabled
+        and not image_matching_blocked
+        and image_match_attempts < settings.eitaa_image_match_limit
+    ):
+        image_task = asyncio.create_task(
+            _search_eitaa_image_results(
+                uniom,
+                torob,
+                row,
+                draft,
+                prefetched_image_bytes=prefetched_images.get(index),
+            )
+        )
+
+    try:
+        text_results = await _search_eitaa_text_results(
+            torob,
+            draft.product_name,
+            text_search_cache,
+            cache_lock,
+        )
+    except TorobClientError as exc:
+        image_outcome = await _finish_eitaa_image_task(image_task)
+        return EitaaMatchOutcome(
+            index=index,
+            row=row,
+            draft=draft,
+            text_results=[],
+            image_outcome=image_outcome,
+            torob_error=exc,
+        )
+
+    image_outcome = await _finish_eitaa_image_task(image_task)
+    return EitaaMatchOutcome(
+        index=index,
+        row=row,
+        draft=draft,
+        text_results=text_results,
+        image_outcome=image_outcome,
+    )
+
+
 async def _search_eitaa_image_results(
     uniom: UniomClient,
     torob: TorobClient,
     row: SubmissionRow,
     draft: EitaaProductDraft,
+    prefetched_image_bytes: bytes | None = None,
 ) -> EitaaImageSearchOutcome:
-    image_bytes = await _store_eitaa_product_image(uniom, row, draft)
+    if prefetched_image_bytes is not None:
+        image_bytes = _persist_eitaa_product_image(row, draft, prefetched_image_bytes)
+    else:
+        image_bytes = await _store_eitaa_product_image(uniom, row, draft)
     if not image_bytes:
         return EitaaImageSearchOutcome(results=[], attempted=False)
     try:
@@ -530,12 +660,18 @@ async def _search_eitaa_text_results(
     torob: TorobClient,
     product_name: str,
     cache: dict[str, list[TorobSearchResult]],
+    cache_lock: asyncio.Lock | None = None,
 ) -> list[TorobSearchResult]:
     combined: list[TorobSearchResult] = []
     seen_prks: set[str] = set()
     for index, query in enumerate(_eitaa_search_queries(product_name)):
         if query not in cache:
-            cache[query] = await torob.search_base_products(query, size=6)
+            if cache_lock is None:
+                cache[query] = await torob.search_base_products(query, size=6)
+            else:
+                async with cache_lock:
+                    if query not in cache:
+                        cache[query] = await torob.search_base_products(query, size=6)
         results = cache[query]
         for result in results:
             if not _is_plausible_eitaa_candidate(product_name, result):
@@ -858,6 +994,10 @@ async def _store_eitaa_product_image(uniom: UniomClient, row: SubmissionRow, dra
         return None
     if not image_bytes:
         return None
+    return _persist_eitaa_product_image(row, draft, image_bytes)
+
+
+def _persist_eitaa_product_image(row: SubmissionRow, draft: EitaaProductDraft, image_bytes: bytes) -> bytes:
     upload_dir = Path(settings.upload_dir) / "eitaa"
     upload_dir.mkdir(parents=True, exist_ok=True)
     safe_message_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", draft.message_id).strip("-") or str(row.id)

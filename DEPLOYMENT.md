@@ -52,9 +52,10 @@ TOROB_RATE_LIMIT_SECONDS=0.10
 6. Deploy.
 7. Check public health: `/health`
 8. Login to `/admin/login`.
-9. Check Torob readiness: `/admin/torob-health`
-10. Test a 5-row Excel file.
-11. Test the 110-row Excel file.
+9. Check Torob search readiness: `/admin/torob-health`
+10. Check Torob bulk-add readiness: `/admin/torob-bulk-health`
+11. Test a 5-row Excel file.
+12. Test the 110-row Excel file.
 
 ## Runtime Behavior
 
@@ -68,7 +69,7 @@ TOROB_RATE_LIMIT_SECONDS=0.10
 
 If Torob readiness fails in production:
 
-1. Open `/admin/torob-health`.
-2. If the error is `torob_bot_challenge`, ask Torob to allowlist the production egress IP or switch to the gateway.
+1. Open `/admin/torob-health` and `/admin/torob-bulk-health`.
+2. If the error is `torob_bot_challenge` or bulk-health `bot_challenge`, ask Torob to allowlist the production egress IP or switch to the gateway.
 3. If the error is `torob_gateway_not_found`, check gateway deploy/routing.
 4. If the error is `torob_timeout`, check network/VPN/firewall.

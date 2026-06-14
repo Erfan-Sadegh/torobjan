@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     eitaa_image_match_enabled: bool = True
     eitaa_image_match_limit: int = Field(default=300, ge=0, le=300)
     eitaa_auto_match_threshold: float = Field(default=0.84, ge=0, le=1)
+    eitaa_concurrency: int = Field(default=4, ge=1, le=10)
+    eitaa_image_prefetch_concurrency: int = Field(default=8, ge=1, le=20)
 
     torob_base_url: str = "https://api.torob.com"
     torob_proxy_token: str = ""

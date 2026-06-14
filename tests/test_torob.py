@@ -1,7 +1,8 @@
 import pytest
 import httpx
 
-from app.services.torob import TorobClient, TorobClientError, _is_bot_challenge, parse_search_results
+from app.services.torob_headers import is_torob_bot_challenge
+from app.services.torob import TorobClient, TorobClientError, parse_search_results
 
 
 def test_parse_search_results_maps_expected_fields() -> None:
@@ -66,7 +67,7 @@ def test_bot_challenge_detection_for_torob_490() -> None:
         text="<title>آیا شما یک ربات هستید؟‌ | ترب</title>",
     )
 
-    assert _is_bot_challenge(response) is True
+    assert is_torob_bot_challenge(response) is True
 
 
 @pytest.mark.asyncio

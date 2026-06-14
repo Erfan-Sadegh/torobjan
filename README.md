@@ -51,7 +51,8 @@ Startup behavior:
 - The container runs `alembic upgrade head`.
 - Then it starts `uvicorn app.main:app`.
 - Public liveness endpoint: `/health`
-- Torob readiness check after admin login: `/admin/torob-health`
+- Torob search readiness check after admin login: `/admin/torob-health`
+- Torob bulk-add readiness check after admin login: `/admin/torob-bulk-health`
 
 Local production-like test:
 
@@ -68,16 +69,24 @@ Production release checklist:
 5. Open `/health`; it should return `ok`.
 6. Login to `/admin/login`.
 7. Open `/admin/torob-health`; it should return `OK`.
-8. Upload a small 5-row Excel file.
-9. If that passes, test the 110-row file.
+8. Open `/admin/torob-bulk-health`; it should return `OK` (tests bulk-add headers without sending products).
+9. Upload a small 5-row Excel file.
+10. If that passes, test the 110-row file.
 
 ## Torob access check
 
-Before testing a large Excel file, login as admin and open:
+Before testing a large Excel file or sending products to Torob, login as admin and open:
 
 ```text
 http://127.0.0.1:8000/admin/torob-health
+http://127.0.0.1:8000/admin/torob-bulk-health
 ```
+
+`/admin/torob-health` checks Torob **search** (matching Excel/Eitaa rows).
+
+`/admin/torob-bulk-health` checks Torob **bulk-add** headers with an empty `items` payload, so no product is added to any shop.
+
+Both endpoints use `TOROB_IW1_HEADER` as the `x-iw1` request header.
 
 If it returns `OK`, Torob search is reachable from the current machine/server.
 
@@ -89,6 +98,7 @@ If Torob temporarily gives you a gateway, set `TOROB_BASE_URL` to that gateway a
 
 ## Notes
 
-- v1 does not add products directly to Torob.
-- Torob search credentials are read from `.env`.
+- Admin can send confirmed seller selections to a Torob shop via bulk-add (`TOROB_BULK_ADD_KEY` required).
+- Torob credentials (`TOROB_IW1_HEADER`, bulk-add key, etc.) are read from `.env`.
 - SQLite is used locally. Set `DATABASE_URL` to a Postgres SQLAlchemy URL for production.
+- Eitaa matching runs with bounded concurrency (`EITAA_CONCURRENCY`, default 4) and shared Torob rate limiting.

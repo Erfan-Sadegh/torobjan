@@ -6,10 +6,12 @@ from typing import Any
 
 import httpx
 
+from app.services.torob_headers import build_torob_request_headers, is_torob_bot_challenge
 from app.settings import settings
 
 MAX_ITEMS_PER_REQUEST = 100
 MAX_TOTAL_ITEMS = 10_000
+HEALTH_CHECK_SHOP_ID = 0
 
 
 @dataclass(frozen=True)
@@ -28,6 +30,13 @@ class TorobBulkAddResult:
         return json.dumps(self.responses, ensure_ascii=False)[:8000]
 
 
+@dataclass(frozen=True)
+class TorobBulkHealthResult:
+    status_code: int
+    outcome: str
+    detail: str
+
+
 class TorobBulkAddClient:
     def __init__(self) -> None:
         self.url = settings.torob_bulk_add_url
@@ -40,6 +49,57 @@ class TorobBulkAddClient:
             await self._client.aclose()
             self._client = None
 
+    async def health_check(self) -> TorobBulkHealthResult:
+        payload = {
+            "bulk_product_adding_key": self.key or "__torobjan_health_check__",
+            "shop_id": HEALTH_CHECK_SHOP_ID,
+            "items": [],
+        }
+        try:
+            response = await self._post_payload(payload)
+        except httpx.TimeoutException:
+            return TorobBulkHealthResult(
+                status_code=0,
+                outcome="timeout",
+                detail="bulk-add endpoint timeout شد.",
+            )
+        except httpx.HTTPError:
+            return TorobBulkHealthResult(
+                status_code=0,
+                outcome="network_error",
+                detail="ارتباط با bulk-add endpoint برقرار نشد.",
+            )
+
+        if is_torob_bot_challenge(response):
+            return TorobBulkHealthResult(
+                status_code=response.status_code,
+                outcome="bot_challenge",
+                detail="ترب صفحه بررسی ربات برگرداند. TOROB_IW1_HEADER و whitelist بودن IP را چک کن.",
+            )
+        if response.status_code in {401, 403}:
+            return TorobBulkHealthResult(
+                status_code=response.status_code,
+                outcome="auth_rejected",
+                detail="endpoint bulk-add در دسترس است ولی کلید bulk add یا دسترسی فروشگاه تایید نشد.",
+            )
+        if response.status_code >= 500:
+            return TorobBulkHealthResult(
+                status_code=response.status_code,
+                outcome="server_error",
+                detail="ترب برای bulk-add پاسخ خطای سرور برگرداند.",
+            )
+        if response.status_code >= 400:
+            return TorobBulkHealthResult(
+                status_code=response.status_code,
+                outcome="reachable",
+                detail="endpoint bulk-add بدون چالش ربات پاسخ داد؛ هدرها و مسیر شبکه سالم به نظر می‌رسند.",
+            )
+        return TorobBulkHealthResult(
+            status_code=response.status_code,
+            outcome="reachable",
+            detail="endpoint bulk-add بدون چالش ربات پاسخ داد.",
+        )
+
     async def bulk_add(self, shop_id: int, items: list[TorobBulkAddItem]) -> TorobBulkAddResult:
         if not self.key:
             raise TorobBulkAddError("missing_key", "کلید bulk add ترب در تنظیمات سرور قرار نگرفته است.")
@@ -50,7 +110,6 @@ class TorobBulkAddClient:
 
         responses: list[Any] = []
         sent_count = 0
-        client = await self._get_client()
         for chunk in _chunks(items, MAX_ITEMS_PER_REQUEST):
             payload = {
                 "bulk_product_adding_key": self.key,
@@ -61,16 +120,18 @@ class TorobBulkAddClient:
                 ],
             }
             try:
-                response = await client.post(
-                    self.url,
-                    json=payload,
-                    headers={"Content-Type": "application/json"},
-                )
+                response = await self._post_payload(payload)
             except httpx.TimeoutException as exc:
                 raise TorobBulkAddError("timeout", "ارسال به ترب timeout شد. کمی بعد دوباره تلاش کن.") from exc
             except httpx.HTTPError as exc:
                 raise TorobBulkAddError("network_error", "ارتباط با endpoint bulk ترب برقرار نشد.") from exc
 
+            if is_torob_bot_challenge(response):
+                raise TorobBulkAddError(
+                    "bot_challenge",
+                    "ترب صفحه بررسی ربات برای bulk-add برگرداند. TOROB_IW1_HEADER و whitelist بودن IP production را چک کن.",
+                    response,
+                )
             if response.status_code in {401, 403}:
                 raise TorobBulkAddError("forbidden", "کلید bulk add یا دسترسی فروشگاه توسط ترب تایید نشد.", response)
             if response.status_code >= 400:
@@ -81,9 +142,17 @@ class TorobBulkAddClient:
 
         return TorobBulkAddResult(sent_count=sent_count, responses=responses)
 
+    async def _post_payload(self, payload: dict[str, object]) -> httpx.Response:
+        client = await self._get_client()
+        headers = build_torob_request_headers(
+            referer="https://torob.com/",
+            content_type="application/json",
+        )
+        return await client.post(self.url, json=payload, headers=headers)
+
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
-            self._client = httpx.AsyncClient(timeout=self.timeout)
+            self._client = httpx.AsyncClient(timeout=self.timeout, trust_env=False)
         return self._client
 
 

@@ -6,6 +6,8 @@ import re
 
 import httpx
 
+from app.services.torob_headers import build_torob_request_headers, is_torob_bot_challenge
+from app.services.torob_rate_limiter import get_torob_rate_limiter
 from app.settings import settings
 
 
@@ -58,7 +60,7 @@ class TorobClient:
                     params=params,
                     headers=headers,
                 )
-                if _is_bot_challenge(response):
+                if is_torob_bot_challenge(response):
                     raise TorobClientError(
                         "torob_bot_challenge",
                         "ترب فعلا درخواست‌های جستجوی خودکار را تایید نمی‌کند. کمی بعد دوباره تلاش کن یا دسترسی ترب را تنظیم کن.",
@@ -85,7 +87,7 @@ class TorobClient:
                     )
                 response.raise_for_status()
                 data = response.json()
-                await asyncio.sleep(self.rate_limit_seconds)
+                await get_torob_rate_limiter().acquire()
                 return parse_search_results(data, size=size, query=query)
             except TorobClientError:
                 raise
@@ -120,7 +122,7 @@ class TorobClient:
                 files={"img": ("eitaa.jpg", image_bytes, "image/jpeg")},
                 headers=headers,
             )
-            if _is_bot_challenge(upload):
+            if is_torob_bot_challenge(upload):
                 raise TorobClientError("torob_bot_challenge", "سرچ تصویری ترب تایید نشد.")
             upload.raise_for_status()
             payload = upload.json()
@@ -144,10 +146,10 @@ class TorobClient:
                 params=params,
                 headers=headers,
             )
-            if _is_bot_challenge(search):
+            if is_torob_bot_challenge(search):
                 raise TorobClientError("torob_bot_challenge", "سرچ تصویری ترب تایید نشد.")
             search.raise_for_status()
-            await asyncio.sleep(self.rate_limit_seconds)
+            await get_torob_rate_limiter().acquire()
             return parse_search_results(search.json(), size=size)
         except TorobClientError:
             raise
@@ -157,28 +159,7 @@ class TorobClient:
             raise TorobClientError("torob_unavailable", "سرچ تصویری ترب کامل نشد.") from exc
 
     def _request_headers(self, referer: str = "https://torob.com/") -> dict[str, str]:
-        headers = {
-            "accept": "*/*",
-            "accept-language": "en-US,en;q=0.9,fa;q=0.8",
-            "origin": "https://torob.com",
-            "referer": referer,
-            "sec-ch-ua": '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
-            "sec-ch-ua-mobile": "?1",
-            "sec-ch-ua-platform": '"Android"',
-            "sec-fetch-dest": "empty",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-site": "same-site",
-            "user-agent": "Mozilla/5.0 (Linux; Android 13; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36",
-        }
-        if settings.torob_proxy_token:
-            headers["x-proxy-token"] = settings.torob_proxy_token
-        if settings.torob_iw1_header:
-            headers["x-iw1"] = settings.torob_iw1_header
-        if settings.torob_cookie:
-            headers["cookie"] = settings.torob_cookie
-        if settings.torob_csrf_token:
-            headers["x-csrftoken"] = settings.torob_csrf_token
-        return headers
+        return build_torob_request_headers(referer=referer)
 
     async def _get_client(self, headers: dict[str, str]) -> httpx.AsyncClient:
         if self._client is None:
@@ -232,16 +213,6 @@ def parse_search_results(data: dict, size: int = 5, query: str = "") -> list[Tor
             )
         )
     return results
-
-
-def _is_bot_challenge(response: httpx.Response) -> bool:
-    if response.status_code == 490:
-        return True
-    content_type = response.headers.get("content-type", "")
-    if "text/html" not in content_type:
-        return False
-    text = response.text[:500]
-    return "آیا شما یک ربات هستید" in text or "robot" in text.lower()
 
 
 def _match_score(query: str, name: str) -> int:

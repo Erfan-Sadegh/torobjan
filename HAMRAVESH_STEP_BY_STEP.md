@@ -118,7 +118,10 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 
 ```text
 /admin/torob-health
+/admin/torob-bulk-health
 ```
+
+`/admin/torob-bulk-health` با `items: []` تست می‌کند و هیچ محصولی به فروشگاه اضافه نمی‌شود.
 
 ## 7. نتیجه‌های ممکن `/admin/torob-health`
 
@@ -147,7 +150,7 @@ IP خروجی همروش باید به ترب داده شود یا باید مو
 
 1. فقط 1 فروشنده واقعی.
 2. حداکثر 100 تا 200 محصول.
-3. قبل از تحویل به فروشنده، `/admin/torob-health` را چک کن.
+3. قبل از تحویل به فروشنده، `/admin/torob-health` و `/admin/torob-bulk-health` را چک کن.
 4. بعد از submission، خروجی Excel را از admin دانلود و دستی بررسی کن.
 5. اگر ردیف‌هایی retry داشتند، اول health را چک کن، بعد retry بزن.
 
