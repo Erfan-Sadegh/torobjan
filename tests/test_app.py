@@ -1743,7 +1743,7 @@ def test_eitaa_preview_groups_review_rows_and_supports_continue(monkeypatch, tmp
     assert "1 محصول نیازمند بررسی مانده" in eitaa_page.text
 
 
-def test_old_eitaa_draft_with_missing_price_unit_shows_global_and_error_unit_controls(tmp_path) -> None:
+def test_old_eitaa_draft_forces_toman_without_showing_unit_controls(tmp_path) -> None:
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
@@ -1804,14 +1804,47 @@ def test_old_eitaa_draft_with_missing_price_unit_shows_global_and_error_unit_con
         db.add(SubmissionSelection(row_id=row.id, match_id=match.id, final_price="330000"))
         db.commit()
         submission_id = submission.id
+        row_id = row.id
+        match_id = match.id
 
     match_page = client.get(f"/submissions/{submission_id}/match")
 
     assert match_page.status_code == 200
-    assert 'data-global-price-unit' in match_page.text
-    assert 'data-price-unit-error-template' in match_page.text
-    assert match_page.text.count('data-price-unit-option="toman"') == 2
-    assert match_page.text.count('data-price-unit-option="rial"') == 2
+    assert 'name="price_unit" value="toman"' in match_page.text
+    assert 'data-global-price-unit' not in match_page.text
+    assert 'data-price-unit-error-template' not in match_page.text
+    assert 'data-price-unit-option="toman"' not in match_page.text
+    assert 'data-price-unit-option="rial"' not in match_page.text
+    assert "اول مشخص کن قیمت‌ها به تومان هستند یا ریال." not in match_page.text
+
+    draft = client.post(
+        f"/submissions/{submission_id}/draft",
+        data={
+            f"selected_{row_id}": str(match_id),
+            f"price_{row_id}": "1,200,000",
+        },
+    )
+    assert draft.status_code == 200
+
+    with TestingSessionLocal() as db:
+        submission = db.query(Submission).first()
+        assert submission.price_unit == "toman"
+        assert submission.rows[0].final_price == "1200000"
+
+    confirm = client.post(
+        f"/submissions/{submission_id}/confirm",
+        data={
+            f"selected_{row_id}": str(match_id),
+            f"price_{row_id}": "1,500,000",
+            "price_unit": "rial",
+        },
+    )
+    assert confirm.status_code == 200
+
+    with TestingSessionLocal() as db:
+        submission = db.query(Submission).first()
+        assert submission.price_unit == "toman"
+        assert submission.rows[0].final_price == "1500000"
 
 
 def test_eitaa_resume_card_counts_review_rows_not_ready_rows(tmp_path) -> None:

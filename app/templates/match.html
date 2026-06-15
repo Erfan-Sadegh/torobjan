@@ -51,7 +51,7 @@
         data-submission-id="{{ submission.id }}"
         data-source="{{ submission.source }}"
         data-submit-label="{{ 'تایید و ثبت' if is_eitaa else 'ثبت' }}">
-    <input type="hidden" name="price_unit" value="{{ submission.price_unit or '' }}" data-price-unit-value>
+    <input type="hidden" name="price_unit" value="{{ 'toman' if is_eitaa else (submission.price_unit or '') }}" data-price-unit-value>
     <input type="hidden" name="finish_mode" value="complete" data-finish-mode>
     {% if valid_count %}
       <div class="selection-guide{% if is_eitaa %} eitaa-selection-guide{% endif %}">
@@ -63,24 +63,6 @@
             <p>هر تعدادی که انتخاب کردی رو می‌تونی ثبت کنی و هر وقت فرصت داشتی ادامه بدی. انتخاب‌ها ذخیره می‌شود.</p>
           {% endif %}
         </div>
-        {% if is_eitaa and not submission_price_unit %}
-          <div class="price-unit-card global-price-unit-card" data-price-unit-card data-global-price-unit>
-            <div class="price-unit-title">قیمت‌های کانال به ریال هستند یا تومان؟</div>
-            <div class="price-unit-options">
-              <button class="unit-option" type="button" data-price-unit-option="toman">تومان</button>
-              <button class="unit-option" type="button" data-price-unit-option="rial">ریال</button>
-            </div>
-          </div>
-          <template data-price-unit-error-template>
-            <div class="inline-price-unit-options" data-price-unit-card>
-              <span>واحد قیمت را همین‌جا انتخاب کن:</span>
-              <div class="price-unit-options">
-                <button class="unit-option" type="button" data-price-unit-option="toman">تومان</button>
-                <button class="unit-option" type="button" data-price-unit-option="rial">ریال</button>
-              </div>
-            </div>
-          </template>
-        {% endif %}
       </div>
     {% endif %}
   {% endif %}
@@ -354,12 +336,14 @@
         showInlineFormError("برای کالاهای انتخاب‌شده، قیمت نهایی را وارد کن.");
         return;
       }
-      const unitInput = document.querySelector("[data-price-unit-value]");
-      if (unitInput && !unitInput.value) {
-        showInlineFormError("اول مشخص کن قیمت‌ها به تومان هستند یا ریال.", { showPriceUnit: true });
-        document.querySelector("[data-price-unit-card]")?.scrollIntoView({ behavior: "smooth", block: "center" });
-        return;
-      }
+      {% if not is_eitaa %}
+        const unitInput = document.querySelector("[data-price-unit-value]");
+        if (unitInput && !unitInput.value) {
+          showInlineFormError("اول مشخص کن قیمت‌ها به تومان هستند یا ریال.");
+          document.querySelector("[data-price-unit-card]")?.scrollIntoView({ behavior: "smooth", block: "center" });
+          return;
+        }
+      {% endif %}
       await saveDraft();
       const confirmModal = document.querySelector("[data-confirm-modal]");
       if (getSelectedRowCount() < validRowCount && confirmModal) {
@@ -397,17 +381,13 @@
     matchForm.submit();
   }
 
-  function showInlineFormError(message, options = {}) {
+  function showInlineFormError(message) {
     document.querySelectorAll(".form-alert").forEach((item) => item.remove());
     const alert = document.createElement("div");
     alert.className = "error form-alert";
     const messageElement = document.createElement("p");
     messageElement.textContent = message;
     alert.appendChild(messageElement);
-    if (options.showPriceUnit) {
-      const template = document.querySelector("[data-price-unit-error-template]");
-      if (template) alert.appendChild(template.content.cloneNode(true));
-    }
     matchForm.prepend(alert);
     alert.scrollIntoView({ behavior: "smooth", block: "center" });
   }

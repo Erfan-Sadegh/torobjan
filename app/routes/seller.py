@@ -1093,7 +1093,9 @@ async def save_submission_draft(
 
 def _save_submission_selections(form, submission: Submission, db: Session, mark_submitted: bool) -> SelectionSaveResult:
     submitted_price_unit = str(form.get("price_unit") or "").strip()
-    if submitted_price_unit in {"toman", "rial"}:
+    if submission.source == "eitaa":
+        submission.price_unit = "toman"
+    elif submitted_price_unit in {"toman", "rial"}:
         submission.price_unit = submitted_price_unit
     price_unit = submission.price_unit or "toman"
     submitted_count = 0
