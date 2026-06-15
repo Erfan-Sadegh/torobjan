@@ -1277,7 +1277,7 @@ def _get_resume_state(db: Session, cookie_value: str | None, source: str = "exce
 
 
 def _price_unit_row_ids(submission: Submission, rows: list[SubmissionRow] | None = None) -> set[int]:
-    if submission.price_unit:
+    if submission.price_unit or submission.source == "eitaa":
         return set()
     candidate_rows = rows if rows is not None else _visible_selection_rows(submission)
     valid_rows = [row for row in candidate_rows if row.input_product_name and row.matches and not row.error_message]

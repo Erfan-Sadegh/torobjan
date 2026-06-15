@@ -664,6 +664,36 @@ input[type="file"] {
   line-height: 1.8;
 }
 
+.eitaa-selection-guide .progress-note {
+  background: #fffaf0;
+  border-color: #f2dfb5;
+}
+
+.eitaa-selection-guide .progress-note p {
+  color: #4f4637;
+}
+
+.global-price-unit-card {
+  width: fit-content;
+  margin: 0;
+  padding: 2px 4px;
+}
+
+.form-alert p {
+  margin: 0;
+}
+
+.inline-price-unit-options {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+  color: #7a271a;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .match-summary {
   display: flex;
   flex-wrap: wrap;

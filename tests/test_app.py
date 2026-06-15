@@ -1711,6 +1711,8 @@ def test_eitaa_preview_groups_review_rows_and_supports_continue(monkeypatch, tmp
     assert "قیمت از کانال تشخیص داده نشد" in match_page.text
     assert "reveal-more-btn" in match_page.text
     assert match_page.text.count("hidden data-extra-match") == 2
+    assert "می‌تونی همین‌هایی که آماده تایید هستند رو اضافه کنی و بقیه رو بذاری برای کمی بعد انجام بدی." in match_page.text
+    assert "data-global-price-unit" not in match_page.text
     assert "ذخیره همین‌ها و ادامه بعدا" in match_page.text
 
     confirm = client.post(
@@ -1739,6 +1741,77 @@ def test_eitaa_preview_groups_review_rows_and_supports_continue(monkeypatch, tmp
     eitaa_page = client.get("/eitaa")
     assert "بررسی محصولات فروشگاه ایتا ناتمام مانده" in eitaa_page.text
     assert "1 محصول نیازمند بررسی مانده" in eitaa_page.text
+
+
+def test_old_eitaa_draft_with_missing_price_unit_shows_global_and_error_unit_controls(tmp_path) -> None:
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    db_path = tmp_path / "test.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(bind=engine)
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app = create_app()
+    app.dependency_overrides[get_db] = override_get_db
+    client = TestClient(app)
+
+    with TestingSessionLocal() as db:
+        submission = Submission(
+            store_name="فروشگاه قدیمی ایتا",
+            source="eitaa",
+            source_ref="@legacy",
+            status="ready",
+            price_unit=None,
+            total_rows=1,
+            selected_rows=1,
+        )
+        db.add(submission)
+        db.commit()
+        db.refresh(submission)
+        row = SubmissionRow(
+            submission_id=submission.id,
+            input_row=1,
+            input_product_name="روغن جامد لادن",
+            input_price="330000",
+            final_price="330000",
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        match = TorobMatch(
+            row_id=row.id,
+            source="torob",
+            rank=0,
+            base_prk="legacy-oil",
+            name="روغن جامد لادن",
+            price=330000,
+            image_url=None,
+            product_url=None,
+            is_already_added=False,
+        )
+        db.add(match)
+        db.commit()
+        db.refresh(match)
+        row.selected_match_id = match.id
+        db.add(SubmissionSelection(row_id=row.id, match_id=match.id, final_price="330000"))
+        db.commit()
+        submission_id = submission.id
+
+    match_page = client.get(f"/submissions/{submission_id}/match")
+
+    assert match_page.status_code == 200
+    assert 'data-global-price-unit' in match_page.text
+    assert 'data-price-unit-error-template' in match_page.text
+    assert match_page.text.count('data-price-unit-option="toman"') == 2
+    assert match_page.text.count('data-price-unit-option="rial"') == 2
 
 
 def test_eitaa_resume_card_counts_review_rows_not_ready_rows(tmp_path) -> None:
