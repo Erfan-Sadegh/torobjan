@@ -343,6 +343,15 @@ def test_upload_confirm_admin_export(monkeypatch, tmp_path) -> None:
     app.dependency_overrides[get_db] = override_get_db
     client = TestClient(app)
 
+    excel_page = client.get("/excel")
+    assert excel_page.status_code == 200
+    assert "دانلود قالب اکسل" not in excel_page.text
+    assert "خروجی اکسل نرم‌افزار حسابداری را هم می‌تونی همین‌جا وارد کنی." in excel_page.text
+
+    eitaa_page = client.get("/eitaa")
+    assert eitaa_page.status_code == 200
+    assert "اگر پیام عکس داشته باشد" not in eitaa_page.text
+
     upload = client.post(
         "/uploads",
         data={"store_name": "فروشگاه تست", "seller_phone": "09121234567"},
@@ -371,6 +380,8 @@ def test_upload_confirm_admin_export(monkeypatch, tmp_path) -> None:
 
     match_page = client.get(f"/submissions/{submission_id}/match")
     assert match_page.status_code == 200
+    assert "ردیف 1: رب گوجه" in match_page.text
+    assert "ردیف 2: رب گوجه" not in match_page.text
     assert "رب گوجه روژین ترب" in match_page.text
     assert f'value="{match_id}" checked' not in match_page.text
     assert f'value="{second_match_id}" checked' not in match_page.text
@@ -379,6 +390,7 @@ def test_upload_confirm_admin_export(monkeypatch, tmp_path) -> None:
     assert "قیمت باسلام" not in match_page.text
     assert "بیشتر" in match_page.text
     assert 'value="165,000"' in match_page.text
+    assert "formatPriceInput" in match_page.text
     assert "محصول انتخاب شده" in match_page.text
 
     confirm = client.post(
@@ -1328,6 +1340,46 @@ async def test_eitaa_text_search_keeps_related_product_variants() -> None:
     results = await _search_eitaa_text_results(CabbageTorobClient(), "کلم سفید و قرمز", {})
 
     assert [item.base_prk for item in results] == ["white-cabbage", "red-cabbage"]
+
+
+@pytest.mark.asyncio
+async def test_eitaa_text_search_skips_broader_query_when_exact_query_has_candidates() -> None:
+    from app.routes.seller import _search_eitaa_text_results
+
+    class CountingTorobClient:
+        def __init__(self) -> None:
+            self.queries: list[str] = []
+
+        async def search_base_products(self, query: str, size: int = 5, page: int = 0) -> list[TorobSearchResult]:
+            self.queries.append(query)
+            return [make_torob_result("tomato", "رب گوجه روژین", 120000)]
+
+    client = CountingTorobClient()
+    results = await _search_eitaa_text_results(client, "رب گوجه روژین ۸۰۰ گرم", {})
+
+    assert [item.base_prk for item in results] == ["tomato"]
+    assert client.queries == ["رب گوجه روژین ۸۰۰ گرم"]
+
+
+@pytest.mark.asyncio
+async def test_eitaa_text_search_uses_broader_query_when_exact_results_are_unrelated() -> None:
+    from app.routes.seller import _search_eitaa_text_results
+
+    class FallbackTorobClient:
+        def __init__(self) -> None:
+            self.queries: list[str] = []
+
+        async def search_base_products(self, query: str, size: int = 5, page: int = 0) -> list[TorobSearchResult]:
+            self.queries.append(query)
+            if len(self.queries) == 1:
+                return [make_torob_result("unrelated", "شامپو مو", 200000)]
+            return [make_torob_result("tomato", "رب گوجه روژین", 120000)]
+
+    client = FallbackTorobClient()
+    results = await _search_eitaa_text_results(client, "رب گوجه روژین ۸۰۰ گرم", {})
+
+    assert [item.base_prk for item in results] == ["tomato"]
+    assert client.queries == ["رب گوجه روژین ۸۰۰ گرم", "رب گوجه روژین ۸۰۰"]
 
 
 def test_eitaa_processing_status_is_indeterminate_before_rows_are_known(tmp_path) -> None:

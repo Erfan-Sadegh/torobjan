@@ -2,8 +2,5 @@
   <div class="error">{{ submission.error_message or ("پردازش کانال با خطا متوقف شد." if submission.source == "eitaa" else "پردازش فایل با خطا متوقف شد.") }}</div>
   <div class="section-actions inline-actions">
     <a class="btn secondary" href="/">بازگشت به صفحه اصلی</a>
-    {% if submission.source != "eitaa" %}
-      <a class="text-link" href="/template.xlsx">دانلود قالب اکسل</a>
-    {% endif %}
   </div>
 </div>

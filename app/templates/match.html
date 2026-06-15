@@ -236,9 +236,26 @@
 
   document.addEventListener("input", (event) => {
     if (event.target.matches('input[name^="price_"]')) {
+      formatPriceInput(event.target);
       scheduleDraftSave();
     }
   });
+
+  function formatPriceInput(input) {
+    const rawValue = input.value;
+    const cursor = input.selectionStart ?? rawValue.length;
+    const digitsBeforeCursor = rawValue.slice(0, cursor).replace(/\D/g, "").length;
+    const digits = rawValue.replace(/\D/g, "");
+    input.value = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    if (document.activeElement !== input || !input.setSelectionRange) return;
+    let nextCursor = 0;
+    let seenDigits = 0;
+    while (nextCursor < input.value.length && seenDigits < digitsBeforeCursor) {
+      if (/\d/.test(input.value[nextCursor])) seenDigits += 1;
+      nextCursor += 1;
+    }
+    input.setSelectionRange(nextCursor, nextCursor);
+  }
 
   document.addEventListener("click", async (event) => {
     const button = event.target.closest(".retry-btn");
@@ -370,6 +387,7 @@
     alert.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
+  document.querySelectorAll('input[name^="price_"]').forEach(formatPriceInput);
   breakHintBaseline = updateSelectionSummary({ allowBreakHint: false });
 </script>
 {% endblock %}

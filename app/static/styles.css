@@ -348,6 +348,13 @@ input[type="file"] {
   min-width: 0;
 }
 
+.upload-source-hint {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.7;
+}
+
 .file-picker input[type="file"] {
   position: absolute;
   inset-block-start: 0;

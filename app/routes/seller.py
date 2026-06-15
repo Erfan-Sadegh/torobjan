@@ -680,7 +680,9 @@ async def _search_eitaa_text_results(
                 continue
             seen_prks.add(result.base_prk)
             combined.append(result)
-        if index == 0 and _best_eitaa_text_score(product_name, combined) >= settings.eitaa_auto_match_threshold:
+        # The broader query is a recovery path. When the exact query already
+        # returns reviewable candidates, another request only adds latency.
+        if index == 0 and combined:
             break
     return combined[:8]
 
@@ -704,10 +706,6 @@ def _clean_eitaa_query(value: str) -> str:
     text = re.sub(r"[^\wآ-ی۰-۹0-9]+", " ", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
-
-
-def _best_eitaa_text_score(product_name: str, results: list[TorobSearchResult]) -> float:
-    return max((score_product_match(product_name, result.name) for result in results), default=0.0)
 
 
 def _is_plausible_eitaa_candidate(product_name: str, result: TorobSearchResult) -> bool:
@@ -1176,6 +1174,7 @@ def _render_match(request: Request, db: Session, submission_id: int) -> Response
             "eitaa_needs_match_count": eitaa_needs_match_count,
             "price_unit_row_ids": price_unit_row_ids,
             "submission_price_unit": submission.price_unit,
+            "display_row_numbers": _display_row_numbers(submission),
             "submitted_rows_count": len([row for row in submission.rows if row.submitted_at]),
         },
     )
@@ -1199,8 +1198,14 @@ def _render_row_card(request: Request, row: SubmissionRow) -> Response:
             "row": row,
             "price_unit_row_ids": _price_unit_row_ids(submission) if submission else set(),
             "submission_price_unit": submission.price_unit if submission else None,
+            "display_row_numbers": _display_row_numbers(submission) if submission else {},
         },
     )
+
+
+def _display_row_numbers(submission: Submission) -> dict[int, int]:
+    product_rows = [row for row in submission.rows if row.input_product_name]
+    return {row.id: index for index, row in enumerate(product_rows, start=1)}
 
 
 def _visible_selection_rows(submission: Submission) -> list[SubmissionRow]:
