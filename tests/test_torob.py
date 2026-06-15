@@ -107,3 +107,95 @@ async def test_torob_client_sends_iw1_header(monkeypatch) -> None:
     await client.search_base_products("رب گوجه")
 
     assert captured_headers["x-iw1"] == "test-iw1"
+
+
+@pytest.mark.asyncio
+async def test_torob_client_acquires_rate_limit_before_text_request(monkeypatch) -> None:
+    events: list[str] = []
+
+    class FakeLimiter:
+        async def acquire(self) -> None:
+            events.append("limit")
+
+    class FakeAsyncClient:
+        async def get(self, *args, **kwargs):
+            events.append("get")
+            return httpx.Response(200, json={"results": []}, request=httpx.Request("GET", "https://example.test"))
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: FakeAsyncClient())
+    monkeypatch.setattr("app.services.torob.get_torob_rate_limiter", lambda: FakeLimiter())
+
+    await TorobClient().search_base_products("رب گوجه")
+
+    assert events == ["limit", "get"]
+
+
+@pytest.mark.asyncio
+async def test_torob_client_acquires_rate_limit_for_each_retry(monkeypatch) -> None:
+    limit_calls = 0
+    request_calls = 0
+
+    class FakeLimiter:
+        async def acquire(self) -> None:
+            nonlocal limit_calls
+            limit_calls += 1
+
+    class FakeAsyncClient:
+        async def get(self, *args, **kwargs):
+            nonlocal request_calls
+            request_calls += 1
+            if request_calls == 1:
+                raise httpx.ReadTimeout("timeout")
+            return httpx.Response(200, json={"results": []}, request=httpx.Request("GET", "https://example.test"))
+
+        async def aclose(self):
+            return None
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: FakeAsyncClient())
+    monkeypatch.setattr("app.services.torob.get_torob_rate_limiter", lambda: FakeLimiter())
+    monkeypatch.setattr("app.services.torob.asyncio.sleep", no_sleep)
+    client = TorobClient()
+    client.max_retries = 1
+
+    await client.search_base_products("رب گوجه")
+
+    assert request_calls == 2
+    assert limit_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_torob_client_rate_limits_image_upload_and_search(monkeypatch) -> None:
+    events: list[str] = []
+
+    class FakeLimiter:
+        async def acquire(self) -> None:
+            events.append("limit")
+
+    class FakeAsyncClient:
+        async def post(self, *args, **kwargs):
+            events.append("post")
+            return httpx.Response(
+                200,
+                json={"image_url": "https://image.example/upload.jpg"},
+                request=httpx.Request("POST", "https://example.test/upload"),
+            )
+
+        async def get(self, *args, **kwargs):
+            events.append("get")
+            return httpx.Response(200, json={"results": []}, request=httpx.Request("GET", "https://example.test/search"))
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: FakeAsyncClient())
+    monkeypatch.setattr("app.services.torob.get_torob_rate_limiter", lambda: FakeLimiter())
+
+    await TorobClient().search_by_image_bytes(b"image")
+
+    assert events == ["limit", "post", "limit", "get"]

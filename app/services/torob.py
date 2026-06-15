@@ -55,6 +55,7 @@ class TorobClient:
         for attempt in range(self.max_retries + 1):
             try:
                 client = await self._get_client(headers)
+                await get_torob_rate_limiter().acquire()
                 response = await client.get(
                     f"{self.base_url}/v4/base-product/search/",
                     params=params,
@@ -87,7 +88,6 @@ class TorobClient:
                     )
                 response.raise_for_status()
                 data = response.json()
-                await get_torob_rate_limiter().acquire()
                 return parse_search_results(data, size=size, query=query)
             except TorobClientError:
                 raise
@@ -117,6 +117,7 @@ class TorobClient:
         headers = self._request_headers(referer="https://torob.com/search-by-image/")
         client = await self._get_client(headers)
         try:
+            await get_torob_rate_limiter().acquire()
             upload = await client.post(
                 f"{self.base_url}/v4/base-product/search-image-upload/",
                 files={"img": ("eitaa.jpg", image_bytes, "image/jpeg")},
@@ -141,6 +142,7 @@ class TorobClient:
                 for key in ("x", "y", "w", "h"):
                     if key in box:
                         params[key] = box[key]
+            await get_torob_rate_limiter().acquire()
             search = await client.get(
                 f"{self.base_url}/v4/base-product/search-by-image/",
                 params=params,
@@ -149,7 +151,6 @@ class TorobClient:
             if is_torob_bot_challenge(search):
                 raise TorobClientError("torob_bot_challenge", "سرچ تصویری ترب تایید نشد.")
             search.raise_for_status()
-            await get_torob_rate_limiter().acquire()
             return parse_search_results(search.json(), size=size)
         except TorobClientError:
             raise

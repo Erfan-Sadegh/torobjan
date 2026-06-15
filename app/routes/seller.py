@@ -334,7 +334,6 @@ async def process_eitaa_submission(submission_id: int) -> None:
             db.commit()
             return
 
-        prefetched_images = await _prefetch_eitaa_images(uniom, drafts)
         rows_by_index: dict[int, SubmissionRow] = {}
         for index, draft in enumerate(drafts, start=1):
             row = SubmissionRow(
@@ -353,12 +352,21 @@ async def process_eitaa_submission(submission_id: int) -> None:
         image_matching_blocked = False
         consecutive_torob_failures = 0
         torob_stop_message: str | None = None
-        text_search_cache: dict[str, list[TorobSearchResult]] = {}
+        text_search_cache: dict[str, list[TorobSearchResult] | asyncio.Task[list[TorobSearchResult]]] = {}
         cache_lock = asyncio.Lock()
         chunk_size = settings.eitaa_concurrency
 
         for chunk_start in range(0, len(drafts), chunk_size):
             chunk = list(enumerate(drafts[chunk_start:chunk_start + chunk_size], start=chunk_start + 1))
+            remaining_image_matches = max(0, settings.eitaa_image_match_limit - image_match_attempts)
+            prefetched_images = {}
+            if not image_matching_blocked and remaining_image_matches:
+                prefetched_images = await _prefetch_eitaa_images(
+                    uniom,
+                    [draft for _, draft in chunk],
+                    start_index=chunk_start + 1,
+                    limit=remaining_image_matches,
+                )
             chunk_outcomes = await asyncio.gather(
                 *[
                     _match_eitaa_draft(
@@ -517,16 +525,23 @@ def _append_matches(db: Session, row: SubmissionRow, results) -> int:
     return added_count
 
 
-async def _prefetch_eitaa_images(uniom: UniomClient, drafts: list[EitaaProductDraft]) -> dict[int, bytes]:
+async def _prefetch_eitaa_images(
+    uniom: UniomClient,
+    drafts: list[EitaaProductDraft],
+    *,
+    start_index: int = 1,
+    limit: int | None = None,
+) -> dict[int, bytes]:
     prefetched: dict[int, bytes] = {}
     if not settings.eitaa_image_match_enabled:
         return prefetched
 
+    image_limit = settings.eitaa_image_match_limit if limit is None else max(0, limit)
     targets: list[tuple[int, EitaaProductDraft]] = []
-    for index, draft in enumerate(drafts, start=1):
+    for index, draft in enumerate(drafts, start=start_index):
         if draft.best_photo is None:
             continue
-        if len(targets) >= settings.eitaa_image_match_limit:
+        if len(targets) >= image_limit:
             break
         targets.append((index, draft))
 
@@ -554,7 +569,7 @@ async def _match_eitaa_draft(
     uniom: UniomClient,
     torob: TorobClient,
     prefetched_images: dict[int, bytes],
-    text_search_cache: dict[str, list[TorobSearchResult]],
+    text_search_cache: dict[str, list[TorobSearchResult] | asyncio.Task[list[TorobSearchResult]]],
     cache_lock: asyncio.Lock,
     image_match_attempts: int,
     image_matching_blocked: bool,
@@ -565,6 +580,7 @@ async def _match_eitaa_draft(
         and settings.eitaa_image_match_enabled
         and not image_matching_blocked
         and image_match_attempts < settings.eitaa_image_match_limit
+        and index in prefetched_images
     ):
         image_task = asyncio.create_task(
             _search_eitaa_image_results(
@@ -659,7 +675,7 @@ def _best_auto_match(
 async def _search_eitaa_text_results(
     torob: TorobClient,
     product_name: str,
-    cache: dict[str, list[TorobSearchResult]],
+    cache: dict[str, list[TorobSearchResult] | asyncio.Task[list[TorobSearchResult]]],
     cache_lock: asyncio.Lock | None = None,
 ) -> list[TorobSearchResult]:
     combined: list[TorobSearchResult] = []
@@ -671,8 +687,23 @@ async def _search_eitaa_text_results(
             else:
                 async with cache_lock:
                     if query not in cache:
-                        cache[query] = await torob.search_base_products(query, size=6)
-        results = cache[query]
+                        cache[query] = asyncio.create_task(torob.search_base_products(query, size=6))
+        cached = cache[query]
+        if isinstance(cached, asyncio.Task):
+            try:
+                results = await cached
+            except Exception:
+                if cache_lock is not None:
+                    async with cache_lock:
+                        if cache.get(query) is cached:
+                            cache.pop(query, None)
+                raise
+            if cache_lock is not None:
+                async with cache_lock:
+                    if cache.get(query) is cached:
+                        cache[query] = results
+        else:
+            results = cached
         for result in results:
             if not _is_plausible_eitaa_candidate(product_name, result):
                 continue
@@ -703,11 +734,14 @@ def _is_plausible_eitaa_candidate(product_name: str, result: TorobSearchResult) 
     if not query_tokens:
         return True
     candidate_tokens = set(_eitaa_candidate_tokens(result.name))
+    match_score = score_product_match(product_name, result.name)
+    if match_score <= 0:
+        return False
     if query_tokens.intersection(candidate_tokens):
         return True
     if len(query_tokens) <= 2:
         return False
-    return score_product_match(product_name, result.name) >= EITAA_CANDIDATE_MIN_SCORE
+    return match_score >= EITAA_CANDIDATE_MIN_SCORE
 
 
 def _eitaa_candidate_tokens(value: str) -> list[str]:

@@ -382,7 +382,7 @@ def score_product_match(query: str, candidate_name: str) -> float:
     candidate_tokens = _meaningful_tokens(candidate_name)
     if not query_tokens or not candidate_tokens:
         return 0.0
-    candidate_only_blockers = {"بذر", "نهال", "دستگاه", "کتاب", "جزوه", "آموزش", "دانلود"}
+    candidate_only_blockers = {"بذر", "نهال", "دستگاه", "کتاب", "جزوه", "آموزش", "دانلود", "موتور"}
     blocker_overlap = candidate_only_blockers.intersection(candidate_tokens) - set(query_tokens)
     if blocker_overlap:
         return 0.0

@@ -1342,6 +1342,40 @@ async def test_eitaa_text_search_keeps_related_product_variants() -> None:
     assert [item.base_prk for item in results] == ["white-cabbage", "red-cabbage"]
 
 
+def test_eitaa_candidate_filter_rejects_seed_for_fresh_produce() -> None:
+    from app.routes.seller import _is_plausible_eitaa_candidate
+
+    result = make_torob_result("seed", "بذر خیار درختی درجه یک", 100000)
+
+    assert _is_plausible_eitaa_candidate("خیار تازه درجه یک", result) is False
+
+
+def test_eitaa_candidate_filter_keeps_seed_when_seed_is_requested() -> None:
+    from app.routes.seller import _is_plausible_eitaa_candidate
+
+    result = make_torob_result("seed", "بذر خیار درختی درجه یک", 100000)
+
+    assert _is_plausible_eitaa_candidate("بذر خیار بوته ای", result) is True
+
+
+def test_eitaa_candidate_filter_keeps_cabbage_color_variants() -> None:
+    from app.routes.seller import _is_plausible_eitaa_candidate
+
+    white = make_torob_result("white", "کلم سفید درجه یک", 45000)
+    red = make_torob_result("red", "کلم قرمز درجه یک", 45000)
+
+    assert _is_plausible_eitaa_candidate("کلم سفید و قرمز درجه یک", white) is True
+    assert _is_plausible_eitaa_candidate("کلم سفید و قرمز درجه یک", red) is True
+
+
+def test_eitaa_candidate_filter_rejects_motor_oil_for_cooking_oil() -> None:
+    from app.routes.seller import _is_plausible_eitaa_candidate
+
+    result = make_torob_result("motor-oil", "روغن موتور لادن مدل 10W40", 500000)
+
+    assert _is_plausible_eitaa_candidate("روغن لادن", result) is False
+
+
 @pytest.mark.asyncio
 async def test_eitaa_text_search_skips_broader_query_when_exact_query_has_candidates() -> None:
     from app.routes.seller import _search_eitaa_text_results
