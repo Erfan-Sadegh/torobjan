@@ -688,17 +688,7 @@ async def _search_eitaa_text_results(
 
 
 def _eitaa_search_queries(product_name: str) -> list[str]:
-    base = _clean_eitaa_query(product_name)
-    variants = [base]
-    broader = re.sub(
-        r"\b(?:درجه|یک|تازه|نو|پاک\s*شده|فله|بسته|کیلویی|کیلو|گرمی|گرم|عدد|عددی|شانه)\b",
-        " ",
-        base,
-    )
-    broader = _clean_eitaa_query(broader)
-    if broader and broader != base and len(broader.split()) >= 2:
-        variants.append(broader)
-    return variants
+    return [_clean_eitaa_query(product_name)]
 
 
 def _clean_eitaa_query(value: str) -> str:

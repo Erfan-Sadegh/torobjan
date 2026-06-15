@@ -1362,24 +1362,22 @@ async def test_eitaa_text_search_skips_broader_query_when_exact_query_has_candid
 
 
 @pytest.mark.asyncio
-async def test_eitaa_text_search_uses_broader_query_when_exact_results_are_unrelated() -> None:
+async def test_eitaa_text_search_does_not_run_a_second_query_when_exact_results_are_unrelated() -> None:
     from app.routes.seller import _search_eitaa_text_results
 
-    class FallbackTorobClient:
+    class CountingTorobClient:
         def __init__(self) -> None:
             self.queries: list[str] = []
 
         async def search_base_products(self, query: str, size: int = 5, page: int = 0) -> list[TorobSearchResult]:
             self.queries.append(query)
-            if len(self.queries) == 1:
-                return [make_torob_result("unrelated", "شامپو مو", 200000)]
-            return [make_torob_result("tomato", "رب گوجه روژین", 120000)]
+            return [make_torob_result("unrelated", "شامپو مو", 200000)]
 
-    client = FallbackTorobClient()
+    client = CountingTorobClient()
     results = await _search_eitaa_text_results(client, "رب گوجه روژین ۸۰۰ گرم", {})
 
-    assert [item.base_prk for item in results] == ["tomato"]
-    assert client.queries == ["رب گوجه روژین ۸۰۰ گرم", "رب گوجه روژین ۸۰۰"]
+    assert results == []
+    assert client.queries == ["رب گوجه روژین ۸۰۰ گرم"]
 
 
 def test_eitaa_processing_status_is_indeterminate_before_rows_are_known(tmp_path) -> None:
