@@ -1,8 +1,16 @@
 {% extends "base.html" %}
 {% block content %}
-{% set is_eitaa = submission.source == "eitaa" %}
+{% set is_eitaa = submission.source in ["eitaa", "eitaa_update"] %}
+{% set is_update = submission.operation == "price_update" %}
 <section class="shell hero">
-  {% if is_eitaa %}
+  {% if is_update %}
+    <h1>بررسی آپدیت قیمت محصولات {{ submission.store_name }}</h1>
+    {% if parseable_count %}
+      <p>{{ update_ready_count }} محصول آماده آپدیت است، {{ update_review_count }} محصول نیازمند بررسی دارد و {{ update_new_count }} محصول جدید قابل اضافه شدن است.</p>
+    {% else %}
+      <p>مورد قابل بررسی برای آپدیت قیمت پیدا نشد.</p>
+    {% endif %}
+  {% elif is_eitaa %}
     <h1>بررسی نهایی محصولات کانال {{ submission.store_name }}</h1>
     {% if parseable_count %}
       <p>{{ eitaa_ready_count }} محصول آماده تایید است و {{ eitaa_review_count }} محصول نیاز به بررسی دارد. هر مورد آماده را نمی‌خواهی بردار و قیمت‌ها را اگر لازم بود اصلاح کن.</p>
@@ -33,6 +41,22 @@
 
   {% if parseable_count %}
   {% if is_eitaa %}
+    {% if is_update %}
+      <div class="match-summary">
+        <div>
+          <strong>{{ update_ready_count }}</strong>
+          <span>آماده آپدیت</span>
+        </div>
+        <div>
+          <strong>{{ update_review_count }}</strong>
+          <span>نیازمند بررسی</span>
+        </div>
+        <div>
+          <strong>{{ update_new_count }}</strong>
+          <span>محصول جدید</span>
+        </div>
+      </div>
+    {% endif %}
     <div class="match-summary">
       <div>
         <strong>{{ eitaa_ready_count }}</strong>
@@ -66,7 +90,41 @@
       </div>
     {% endif %}
   {% endif %}
-    {% if is_eitaa %}
+    {% if is_update %}
+      {% if update_ready_rows %}
+        <div class="match-section">
+          <div class="match-section-head">
+            <h2>آماده آپدیت</h2>
+            <p>این موارد با محصول قبلی فروشگاهت تطبیق مطمئن دارند. اگر قیمت درست است، تیک را نگه دار و ثبت کن.</p>
+          </div>
+          {% for row in update_ready_rows %}
+            {% include "partials/row_card.html" %}
+          {% endfor %}
+        </div>
+      {% endif %}
+      {% if update_review_rows %}
+        <div class="match-section">
+          <div class="match-section-head">
+            <h2>نیازمند بررسی</h2>
+            <p>این موارد هنوز به محصول قبلی یا گزینه قابل انتخاب ترب وصل نشده‌اند. فعلا فقط بررسی‌شان کن تا اشتباهی ثبت نشود.</p>
+          </div>
+          {% for row in update_review_rows %}
+            {% include "partials/row_card.html" %}
+          {% endfor %}
+        </div>
+      {% endif %}
+      {% if update_new_rows %}
+        <div class="match-section">
+          <div class="match-section-head">
+            <h2>محصول جدید</h2>
+            <p>این موارد در سابقه فروشگاه نبودند، اما ترب برایشان گزینه پیدا کرده. اگر محصول درست است، می‌توانی به عنوان کالای جدید اضافه‌شان کنی.</p>
+          </div>
+          {% for row in update_new_rows %}
+            {% include "partials/row_card.html" %}
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% elif is_eitaa %}
       {% if eitaa_review_rows %}
         <div class="match-section">
           <div class="match-section-head">
@@ -154,7 +212,7 @@
 <script>
   const matchForm = document.querySelector("#match-form");
   const submissionSource = matchForm ? matchForm.dataset.source : "";
-  const isEitaaSubmission = submissionSource === "eitaa";
+  const isEitaaSubmission = submissionSource === "eitaa" || submissionSource === "eitaa_update";
   const submitLabel = matchForm ? matchForm.dataset.submitLabel : "ثبت";
   const validRowCount = {{ (parseable_count if is_eitaa else valid_count) or 0 }};
   const breakHintKey = matchForm ? `torobjan-break-hint:${matchForm.dataset.submissionId}` : "";

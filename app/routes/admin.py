@@ -9,9 +9,11 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
 from app.models import Submission, SubmissionBatch, SubmissionBatchItem, SubmissionRow, SubmissionSelection, utc_now
+from app.services.eitaa_updates import create_eitaa_update_preview
 from app.services.excel import build_batch_export_xlsx, build_export_xlsx
 from app.services.torob_bulk import TorobBulkAddClient, TorobBulkAddError, TorobBulkAddItem
 from app.services.torob import TorobClient, TorobClientError
+from app.services.uniom import UniomClient, UniomClientError
 from app.settings import settings
 from app.template_utils import create_templates
 
@@ -93,6 +95,8 @@ def update_shop_id(
     _require_admin(request)
     submission = _get_submission(db, submission_id)
     submission.shop_id = (shop_id or "").strip() or None
+    if submission.store is not None:
+        submission.store.shop_id = submission.shop_id
     db.commit()
     return RedirectResponse(f"/admin/submissions/{submission_id}", status_code=303)
 
@@ -110,6 +114,42 @@ def rebuild_submission_batch(
         return _admin_detail_redirect(submission.id, error="انتخاب قابل بازیابی برای ساخت ثبت ارسال پیدا نشد.")
     db.commit()
     return _admin_detail_redirect(submission.id, message=f"ثبت ارسال برای {created_count} کالا از انتخاب‌های قبلی ساخته شد.")
+
+
+@router.post("/submissions/{submission_id}/eitaa-updates/check")
+async def check_eitaa_updates(
+    request: Request,
+    submission_id: int,
+    db: Session = Depends(get_db),
+) -> Response:
+    _require_admin(request)
+    submission = _get_submission(db, submission_id)
+    store = submission.store
+    if store is None or not store.eitaa_channel_id:
+        return _admin_detail_redirect(submission.id, error="این submission به فروشگاه ایتا وصل نیست.")
+    if not settings.uniom_bot_token:
+        return _admin_detail_redirect(submission.id, error="توکن یونیوم هنوز در تنظیمات سرویس فعال نشده است.")
+
+    offset = (store.eitaa_last_update_id or 0) + 1 if store.eitaa_last_update_id else None
+    uniom = UniomClient()
+    try:
+        updates = await uniom.get_updates(offset=offset, timeout_seconds=30)
+    except UniomClientError as exc:
+        return _admin_detail_redirect(submission.id, error=exc.public_message)
+    finally:
+        await uniom.close()
+
+    result = create_eitaa_update_preview(db, store, updates)
+    db.commit()
+    if result.preview_submission_id is None:
+        return _admin_detail_redirect(
+            submission.id,
+            message=f"{result.processed_update_count} آپدیت بررسی شد؛ تغییر قیمت قابل بررسی پیدا نشد.",
+        )
+    return RedirectResponse(
+        f"/admin/submissions/{result.preview_submission_id}?message=پیش‌نمایش آپدیت قیمت از ایتا ساخته شد.",
+        status_code=303,
+    )
 
 
 @router.get("/submissions/{submission_id}/export.xlsx")
@@ -159,6 +199,12 @@ async def send_batch_to_torob(
     batch = _get_batch(submission, batch_id)
     if batch.status == "sent":
         return _admin_detail_redirect(submission.id, error="این ثبت قبلا به ترب ارسال شده است.")
+
+    if _batch_has_price_update_items(batch):
+        batch.status = "failed"
+        batch.torob_error_message = "ارسال آپدیت قیمت تا آماده شدن endpoint upsert ترب فعال نیست."
+        db.commit()
+        return _admin_detail_redirect(submission.id, error=batch.torob_error_message)
 
     shop_id = _parse_shop_id(submission.shop_id)
     if shop_id is None:
@@ -376,6 +422,10 @@ def _torob_bulk_items(batch: SubmissionBatch) -> tuple[list[TorobBulkAddItem], i
     return items, skipped_count
 
 
+def _batch_has_price_update_items(batch: SubmissionBatch) -> bool:
+    return any(item.operation == "price_update" for item in batch.items)
+
+
 def _parse_positive_int(value: object) -> int | None:
     try:
         amount = int(str(value or "").strip())
@@ -413,6 +463,7 @@ def _get_submission(db: Session, submission_id: int) -> Submission:
             selectinload(Submission.rows).selectinload(SubmissionRow.matches),
             selectinload(Submission.rows).selectinload(SubmissionRow.selected_match),
             selectinload(Submission.rows).selectinload(SubmissionRow.selections).selectinload(SubmissionSelection.match),
+            selectinload(Submission.store),
             selectinload(Submission.batches).selectinload(SubmissionBatch.items).selectinload(SubmissionBatchItem.row),
             selectinload(Submission.batches).selectinload(SubmissionBatch.items).selectinload(SubmissionBatchItem.match),
         )

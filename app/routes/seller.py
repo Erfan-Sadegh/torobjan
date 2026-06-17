@@ -12,12 +12,14 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import SessionLocal, get_db
-from app.models import Submission, SubmissionBatch, SubmissionBatchItem, SubmissionRow, SubmissionSelection, TorobMatch, utc_now
+from app.models import Store, Submission, SubmissionBatch, SubmissionBatchItem, SubmissionRow, SubmissionSelection, TorobMatch, utc_now
 from app.services.eitaa import EitaaProductDraft, extract_eitaa_products, score_product_match
+from app.services.eitaa_updates import create_eitaa_update_preview
 from app.services.excel import ExcelParseError, build_template_xlsx, parse_price, parse_products_excel
 from app.services.product_search import ProductSearchClient, ProductSearchError
 from app.services.torob import TorobClient, TorobClientError, TorobSearchResult
 from app.services.uniom import UniomClient, UniomClientError
+from app.services.update_matching import copy_match_for_row, find_known_store_match
 from app.settings import settings
 from app.template_utils import create_templates
 
@@ -142,10 +144,13 @@ async def upload_products(
     background_tasks: BackgroundTasks,
     store_name: str = Form(...),
     seller_phone: str | None = Form(default=None),
+    operation: str = Form(default="add"),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ) -> Response:
     store_name = store_name.strip()
+    seller_phone = (seller_phone or "").strip() or None
+    operation = "price_update" if operation == "price_update" else "add"
     if not store_name:
         return templates.TemplateResponse(
             request,
@@ -171,9 +176,30 @@ async def upload_products(
             {"error": str(exc)},
             status_code=400,
         )
+    store: Store | None = None
+    if operation == "price_update":
+        store = _resolve_store_for_update(db, store_name, seller_phone)
+        if store is None or not _store_has_added_products(db, store.id):
+            return templates.TemplateResponse(
+                request,
+                "excel.html",
+                {
+                    "error": "برای به‌روزرسانی قیمت، اول باید محصولاتت را اضافه کرده باشی. اگر قبلا اضافه کردی، همان نام فروشگاه یا شماره موبایل قبلی را وارد کن.",
+                    "store_name": store_name,
+                    "seller_phone": seller_phone or "",
+                },
+                status_code=400,
+            )
+    else:
+        store = _get_or_create_excel_store(db, store_name, seller_phone)
     submission = Submission(
+        store=store,
         store_name=store_name,
-        seller_phone=(seller_phone or "").strip() or None,
+        seller_phone=seller_phone,
+        shop_id=store.shop_id if store else None,
+        source="excel_update" if operation == "price_update" else "excel",
+        operation=operation,
+        price_unit="toman" if operation == "price_update" else None,
         original_filename=file.filename,
         status="processing",
     )
@@ -193,13 +219,16 @@ async def upload_products(
     submission.stored_file_path = _store_upload_file(submission.id, file.filename, content)
     submission.total_rows = len([row for row in parsed_rows if row.product_name])
     for parsed in parsed_rows:
-        db.add(_row_from_parsed(submission.id, parsed))
+        db.add(_row_from_parsed(submission.id, parsed, operation="needs_review" if operation == "price_update" else "add"))
     if submission.total_rows == 0:
         submission.status = "ready"
     db.commit()
 
     if submission.total_rows > 0:
-        background_tasks.add_task(process_submission_matches, submission.id)
+        if operation == "price_update":
+            background_tasks.add_task(process_excel_update_submission, submission.id)
+        else:
+            background_tasks.add_task(process_submission_matches, submission.id)
 
     response = templates.TemplateResponse(request, "processing.html", {"submission": submission})
     _set_seller_draft_cookie(response, submission.id)
@@ -239,11 +268,15 @@ async def import_eitaa_products(
             status_code=503,
         )
 
+    store = _get_or_create_eitaa_store(db, store_name, (seller_phone or "").strip() or None, channel_id)
     submission = Submission(
+        store=store,
         store_name=store_name,
         seller_phone=(seller_phone or "").strip() or None,
+        shop_id=store.shop_id,
         source="eitaa",
         source_ref=channel_id,
+        operation="add",
         price_unit="toman",
         status="processing",
     )
@@ -254,6 +287,90 @@ async def import_eitaa_products(
     background_tasks.add_task(process_eitaa_submission, submission.id)
     response = templates.TemplateResponse(request, "processing.html", {"submission": submission})
     _set_seller_draft_cookie(response, submission.id)
+    return response
+
+
+@router.post("/eitaa/update")
+async def update_eitaa_prices(
+    request: Request,
+    store_name: str = Form(...),
+    seller_phone: str | None = Form(default=None),
+    channel_id: str = Form(...),
+    db: Session = Depends(get_db),
+) -> Response:
+    store_name = store_name.strip()
+    seller_phone = (seller_phone or "").strip() or None
+    channel_id = _normalize_eitaa_channel(channel_id)
+    if not store_name or not channel_id:
+        return templates.TemplateResponse(
+            request,
+            "eitaa.html",
+            {
+                "error": "نام فروشگاه و آیدی کانال ایتا برای بررسی آپدیت لازم است.",
+                "store_name": store_name,
+                "seller_phone": seller_phone or "",
+                "channel_id": channel_id,
+            },
+            status_code=400,
+        )
+    if not settings.uniom_bot_token:
+        return templates.TemplateResponse(
+            request,
+            "eitaa.html",
+            {
+                "error": "توکن یونیوم هنوز در تنظیمات سرویس فعال نشده است.",
+                "store_name": store_name,
+                "seller_phone": seller_phone or "",
+                "channel_id": channel_id,
+            },
+            status_code=503,
+        )
+    store = _resolve_eitaa_store_for_update(db, store_name, seller_phone, channel_id)
+    if store is None or not _store_has_added_products(db, store.id):
+        return templates.TemplateResponse(
+            request,
+            "eitaa.html",
+            {
+                "error": "برای آپدیت قیمت ایتا، اول باید محصولات همین فروشگاه را اضافه کرده باشی.",
+                "store_name": store_name,
+                "seller_phone": seller_phone or "",
+                "channel_id": channel_id,
+            },
+            status_code=400,
+        )
+
+    offset = (store.eitaa_last_update_id or 0) + 1 if store.eitaa_last_update_id else None
+    uniom = UniomClient()
+    search_client = ProductSearchClient()
+    try:
+        updates = await uniom.get_updates(offset=offset, timeout_seconds=30)
+        torob_results_by_name = await _search_update_products_in_torob(updates, search_client)
+    except UniomClientError as exc:
+        return templates.TemplateResponse(
+            request,
+            "eitaa.html",
+            {"error": exc.public_message, "store_name": store_name, "seller_phone": seller_phone or "", "channel_id": channel_id},
+            status_code=503,
+        )
+    finally:
+        await search_client.close()
+        await uniom.close()
+
+    result = create_eitaa_update_preview(db, store, updates, torob_results_by_name=torob_results_by_name)
+    db.commit()
+    if result.preview_submission_id is None:
+        return templates.TemplateResponse(
+            request,
+            "eitaa.html",
+            {
+                "error": "آپدیت قیمت قابل بررسی پیدا نشد. اگر تازه پست گذاشتی، چند دقیقه بعد دوباره تلاش کن.",
+                "store_name": store_name,
+                "seller_phone": seller_phone or "",
+                "channel_id": channel_id,
+            },
+        )
+    response = _render_match(request, db, result.preview_submission_id)
+    _set_seller_draft_cookie(response, result.preview_submission_id)
     return response
 
 
@@ -306,6 +423,68 @@ async def process_submission_matches(submission_id: int) -> None:
         if submission is not None:
             submission.status = "failed"
             submission.error_message = f"پردازش با خطا متوقف شد: {exc}"
+            db.commit()
+    finally:
+        await client.close()
+        db.close()
+
+
+async def process_excel_update_submission(submission_id: int) -> None:
+    db = SessionLocal()
+    client = ProductSearchClient()
+    try:
+        submission = _get_submission(db, submission_id)
+        rows = [row for row in submission.rows if row.input_product_name and not row.error_message]
+        for row in rows:
+            row.final_price = row.input_price
+            if not row.input_price:
+                row.operation = "needs_review"
+                row.error_message = "برای آپدیت قیمت، قیمت جدید این ردیف در فایل مشخص نشده است."
+                db.commit()
+                continue
+
+            known_match = find_known_store_match(db, submission.store_id, row.input_product_name or "")
+            if known_match is not None:
+                row.operation = "price_update"
+                match = copy_match_for_row(row.id, known_match)
+                db.add(match)
+                db.flush()
+                row.selected_match_id = match.id
+                db.add(SubmissionSelection(row_id=row.id, match_id=match.id, final_price=row.input_price))
+                db.commit()
+                continue
+
+            try:
+                results = await client.search_products(row.input_product_name or "", page=0, per_source=MATCH_BATCH_PER_SOURCE)
+            except ProductSearchError as exc:
+                row.operation = "needs_review"
+                row.error_message = _row_torob_error_message(exc)
+                db.commit()
+                continue
+
+            if not results:
+                row.operation = "needs_review"
+                row.error_message = "این محصول در سابقه فروشگاه نبود و در ترب هم گزینه قابل انتخابی پیدا نشد."
+                row.has_more_matches = False
+                db.commit()
+                continue
+
+            row.operation = "add"
+            row.error_message = None
+            _append_matches(db, row, results)
+            row.has_more_matches = bool(results)
+            row.next_search_page = 1
+            db.commit()
+
+        submission.selected_rows = _count_submission_selections(db, submission.id)
+        submission.status = "ready"
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        submission = db.query(Submission).filter(Submission.id == submission_id).first()
+        if submission is not None:
+            submission.status = "failed"
+            submission.error_message = f"پردازش آپدیت اکسل با خطا متوقف شد: {exc}"
             db.commit()
     finally:
         await client.close()
@@ -469,7 +648,7 @@ async def process_eitaa_submission(submission_id: int) -> None:
         db.close()
 
 
-def _row_from_parsed(submission_id: int, parsed) -> SubmissionRow:
+def _row_from_parsed(submission_id: int, parsed, operation: str = "add") -> SubmissionRow:
     return SubmissionRow(
         submission_id=submission_id,
         input_row=parsed.input_row,
@@ -478,6 +657,7 @@ def _row_from_parsed(submission_id: int, parsed) -> SubmissionRow:
         barcode=parsed.barcode,
         brand=parsed.brand,
         description=parsed.description,
+        operation=operation,
         error_message=parsed.error_message,
     )
 
@@ -1041,6 +1221,95 @@ def _normalize_eitaa_channel(value: str | None) -> str:
     return f"@{text}"
 
 
+def _get_or_create_eitaa_store(db: Session, store_name: str, seller_phone: str | None, channel_id: str) -> Store:
+    store = db.query(Store).filter(Store.eitaa_channel_id == channel_id).first()
+    if store is None:
+        store = Store(
+            name=store_name,
+            seller_phone=seller_phone,
+            eitaa_channel_id=channel_id,
+        )
+        db.add(store)
+        db.flush()
+        return store
+    store.name = store_name
+    if seller_phone:
+        store.seller_phone = seller_phone
+    return store
+
+
+def _resolve_eitaa_store_for_update(db: Session, store_name: str, seller_phone: str | None, channel_id: str) -> Store | None:
+    store = db.query(Store).filter(Store.eitaa_channel_id == channel_id).first()
+    if store is not None:
+        return store
+    return _resolve_store_for_update(db, store_name, seller_phone)
+
+
+def _get_or_create_excel_store(db: Session, store_name: str, seller_phone: str | None) -> Store:
+    store = None
+    if seller_phone:
+        store = db.query(Store).filter(Store.seller_phone == seller_phone).first()
+    if store is None:
+        store = db.query(Store).filter(Store.name == store_name, Store.eitaa_channel_id.is_(None)).first()
+    if store is None:
+        store = Store(name=store_name, seller_phone=seller_phone)
+        db.add(store)
+        db.flush()
+        return store
+    store.name = store_name
+    if seller_phone:
+        store.seller_phone = seller_phone
+    return store
+
+
+def _resolve_store_for_update(db: Session, store_name: str, seller_phone: str | None) -> Store | None:
+    if seller_phone:
+        store = db.query(Store).filter(Store.seller_phone == seller_phone).first()
+        if store is not None:
+            return store
+    return db.query(Store).filter(Store.name == store_name).first()
+
+
+def _store_has_added_products(db: Session, store_id: int) -> bool:
+    return (
+        db.query(SubmissionSelection)
+        .join(SubmissionRow, SubmissionSelection.row_id == SubmissionRow.id)
+        .join(Submission, SubmissionRow.submission_id == Submission.id)
+        .filter(Submission.store_id == store_id)
+        .filter(Submission.operation == "add")
+        .first()
+        is not None
+    )
+
+
+async def _search_update_products_in_torob(updates: list[dict], search_client: ProductSearchClient) -> dict[str, list]:
+    results_by_name: dict[str, list] = {}
+    for update in updates:
+        message = _update_message_from_uniom(update)
+        if message is None:
+            continue
+        for product in extract_eitaa_products([message], max_products=20):
+            if not product.price_toman or product.product_name in results_by_name:
+                continue
+            try:
+                results_by_name[product.product_name] = await search_client.search_products(
+                    product.product_name,
+                    page=0,
+                    per_source=MATCH_BATCH_PER_SOURCE,
+                )
+            except ProductSearchError:
+                results_by_name[product.product_name] = []
+    return results_by_name
+
+
+def _update_message_from_uniom(update: dict) -> dict | None:
+    for key in ("channel_post", "edited_channel_post"):
+        value = update.get(key)
+        if isinstance(value, dict):
+            return value
+    return None
+
+
 @router.post("/submissions/{submission_id}/confirm")
 async def confirm_submission(
     request: Request,
@@ -1093,7 +1362,7 @@ async def save_submission_draft(
 
 def _save_submission_selections(form, submission: Submission, db: Session, mark_submitted: bool) -> SelectionSaveResult:
     submitted_price_unit = str(form.get("price_unit") or "").strip()
-    if submission.source == "eitaa":
+    if submission.source in {"eitaa", "eitaa_update"}:
         submission.price_unit = "toman"
     elif submitted_price_unit in {"toman", "rial"}:
         submission.price_unit = submitted_price_unit
@@ -1125,7 +1394,7 @@ def _save_submission_selections(form, submission: Submission, db: Session, mark_
         for match in valid_matches:
             db.add(SubmissionSelection(row_id=row.id, match_id=match.id, final_price=price_value))
             if mark_submitted:
-                batch_item_values.append((row.id, match.id, price_value))
+                batch_item_values.append((row.id, match.id, price_value, row.operation or submission.operation or "add"))
     batch_id = None
     if mark_submitted and batch_item_values and submitted_timestamp is not None:
         batch = SubmissionBatch(
@@ -1137,12 +1406,13 @@ def _save_submission_selections(form, submission: Submission, db: Session, mark_
         db.add(batch)
         db.flush()
         batch_id = batch.id
-        for row_id, match_id, price_value in batch_item_values:
+        for row_id, match_id, price_value, operation in batch_item_values:
             db.add(
                 SubmissionBatchItem(
                     batch_id=batch.id,
                     row_id=row_id,
                     match_id=match_id,
+                    operation=operation,
                     final_price=price_value,
                     created_at=submitted_timestamp,
                 )
@@ -1180,6 +1450,13 @@ def _render_match(request: Request, db: Session, submission_id: int) -> Response
     invalid_rows = [row for row in visible_rows if row.error_message]
     eitaa_ready_rows = [row for row in parseable_rows if _is_eitaa_ready_row(row)]
     eitaa_review_rows = [row for row in parseable_rows if row not in eitaa_ready_rows]
+    update_ready_rows = [row for row in parseable_rows if _is_update_ready_row(row)]
+    update_new_rows = [row for row in parseable_rows if row.operation == "add" and row.matches and not row.error_message]
+    update_review_rows = [
+        row
+        for row in parseable_rows
+        if row not in update_ready_rows and row not in update_new_rows
+    ]
     eitaa_missing_price_count = len([row for row in eitaa_review_rows if not row.final_price and not row.input_price])
     eitaa_needs_match_count = len([row for row in eitaa_review_rows if row.matches and not row.selections and not row.error_message])
     price_unit_row_ids = _price_unit_row_ids(submission, visible_rows)
@@ -1196,6 +1473,12 @@ def _render_match(request: Request, db: Session, submission_id: int) -> Response
             "eitaa_review_rows": eitaa_review_rows,
             "eitaa_ready_count": len(eitaa_ready_rows),
             "eitaa_review_count": len(eitaa_review_rows),
+            "update_ready_rows": update_ready_rows,
+            "update_review_rows": update_review_rows,
+            "update_new_rows": update_new_rows,
+            "update_ready_count": len(update_ready_rows),
+            "update_review_count": len(update_review_rows),
+            "update_new_count": len(update_new_rows),
             "eitaa_missing_price_count": eitaa_missing_price_count,
             "eitaa_needs_match_count": eitaa_needs_match_count,
             "price_unit_row_ids": price_unit_row_ids,
@@ -1246,6 +1529,10 @@ def _is_eitaa_ready_row(row: SubmissionRow) -> bool:
     return bool(row.input_product_name and row.selections and row.final_price and not row.error_message)
 
 
+def _is_update_ready_row(row: SubmissionRow) -> bool:
+    return bool(row.operation == "price_update" and row.input_product_name and row.selections and row.final_price and not row.error_message)
+
+
 def _get_resume_state(db: Session, cookie_value: str | None, source: str = "excel") -> tuple[Submission | None, int]:
     if not cookie_value or not cookie_value.isdigit():
         return None, 0
@@ -1260,7 +1547,12 @@ def _get_resume_state(db: Session, cookie_value: str | None, source: str = "exce
     )
     if submission is None:
         return None, 0
-    if submission.source != source or submission.status != "ready":
+    allowed_sources = {source}
+    if source == "eitaa":
+        allowed_sources.add("eitaa_update")
+    if source == "excel":
+        allowed_sources.add("excel_update")
+    if submission.source not in allowed_sources or submission.status != "ready":
         return None, 0
     remaining_selectable_count = _remaining_selectable_count(submission)
     if remaining_selectable_count <= 0:
@@ -1279,7 +1571,7 @@ def _get_resume_state(db: Session, cookie_value: str | None, source: str = "exce
 
 
 def _price_unit_row_ids(submission: Submission, rows: list[SubmissionRow] | None = None) -> set[int]:
-    if submission.price_unit or submission.source == "eitaa":
+    if submission.price_unit or submission.source in {"eitaa", "eitaa_update"}:
         return set()
     candidate_rows = rows if rows is not None else _visible_selection_rows(submission)
     valid_rows = [row for row in candidate_rows if row.input_product_name and row.matches and not row.error_message]

@@ -36,6 +36,18 @@
     </div>
   </form>
 
+  {% if submission.store and submission.store.eitaa_channel_id %}
+    <form class="panel" action="/admin/submissions/{{ submission.id }}/eitaa-updates/check" method="post">
+      <div class="row-head">
+        <div>
+          <h2>بررسی آپدیت قیمت ایتا</h2>
+          <div class="hint">پست‌های جدید یا ویرایش‌شده کانال از آخرین بررسی خوانده می‌شود و فقط پیش‌نمایش ساخته می‌شود؛ چیزی مستقیم به ترب ارسال نمی‌شود.</div>
+        </div>
+        <button class="btn" type="submit">بررسی آپدیت ایتا</button>
+      </div>
+    </form>
+  {% endif %}
+
   <div class="panel admin-send-panel">
     <div class="row-head">
       <div>

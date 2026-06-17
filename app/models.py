@@ -12,16 +12,33 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class Store(Base):
+    __tablename__ = "stores"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    seller_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    shop_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    eitaa_channel_id: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
+    eitaa_last_update_id: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    submissions: Mapped[list[Submission]] = relationship(back_populates="store")
+
+
 class Submission(Base):
     __tablename__ = "submissions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    store_id: Mapped[int | None] = mapped_column(ForeignKey("stores.id"), nullable=True, index=True)
     store_name: Mapped[str] = mapped_column(String(200), nullable=False)
     seller_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     shop_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     price_unit: Mapped[str | None] = mapped_column(String(16), nullable=True)
     source: Mapped[str] = mapped_column(String(32), default="excel", nullable=False)
     source_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    operation: Mapped[str] = mapped_column(String(32), default="add", nullable=False)
     original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     stored_file_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -31,6 +48,7 @@ class Submission(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 
+    store: Mapped[Store | None] = relationship(back_populates="submissions")
     rows: Mapped[list[SubmissionRow]] = relationship(
         back_populates="submission",
         cascade="all, delete-orphan",
@@ -56,6 +74,7 @@ class SubmissionRow(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_message_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     source_image_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    operation: Mapped[str] = mapped_column(String(32), default="add", nullable=False)
     auto_match_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     final_price: Mapped[str | None] = mapped_column(String(80), nullable=True)
@@ -153,6 +172,7 @@ class SubmissionBatchItem(Base):
     batch_id: Mapped[int] = mapped_column(ForeignKey("submission_batches.id"), nullable=False, index=True)
     row_id: Mapped[int] = mapped_column(ForeignKey("submission_rows.id"), nullable=False, index=True)
     match_id: Mapped[int] = mapped_column(ForeignKey("torob_matches.id"), nullable=False, index=True)
+    operation: Mapped[str] = mapped_column(String(32), default="add", nullable=False)
     final_price: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 

@@ -8,7 +8,7 @@ from openpyxl import Workbook, load_workbook
 
 from app.database import Base, get_db
 from app.main import create_app
-from app.models import Submission, SubmissionRow, SubmissionSelection, TorobMatch
+from app.models import Store, Submission, SubmissionBatch, SubmissionBatchItem, SubmissionRow, SubmissionSelection, TorobMatch
 from app.services.product_search import ProductSearchError, ProductSearchResult
 from app.services.torob import TorobClientError, TorobSearchResult
 from app.services.uniom import UniomClientError
@@ -1196,6 +1196,10 @@ def test_eitaa_import_auto_matches_and_waits_for_seller_preview(monkeypatch, tmp
         assert submission is not None
         assert submission.source == "eitaa"
         assert submission.source_ref == "@regaal"
+        assert submission.operation == "add"
+        assert submission.store is not None
+        assert submission.store.eitaa_channel_id == "@regaal"
+        assert submission.store.name == submission.store_name
         assert submission.status == "ready"
         assert submission.price_unit == "toman"
         assert submission.total_rows == 1
@@ -1259,6 +1263,114 @@ def test_eitaa_import_auto_matches_and_waits_for_seller_preview(monkeypatch, tmp
     assert "@regaal" in detail.text
     assert "ارسال به ترب" in detail.text
     assert "nike-voodoo" not in detail.text
+
+
+def test_admin_can_create_eitaa_update_preview_from_uniom_updates(monkeypatch, tmp_path) -> None:
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    db_path = tmp_path / "test.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(bind=engine)
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    with TestingSessionLocal() as db:
+        store = Store(
+            name="Test Store",
+            seller_phone="09120000000",
+            shop_id="411488",
+            eitaa_channel_id="@regaal",
+            eitaa_last_update_id=84,
+        )
+        submission = Submission(
+            store=store,
+            store_name="Test Store",
+            seller_phone="09120000000",
+            shop_id="411488",
+            source="eitaa",
+            source_ref="@regaal",
+            operation="add",
+            status="submitted",
+            price_unit="toman",
+        )
+        row = SubmissionRow(
+            submission=submission,
+            input_row=1,
+            input_product_name="کفش تست",
+            input_price="650000",
+            final_price="650000",
+            source_message_id="124",
+        )
+        match = TorobMatch(
+            row=row,
+            source="torob",
+            rank=0,
+            base_prk="shoe-base-rk",
+            name="کفش تست ترب",
+            price=650000,
+        )
+        db.add_all([store, submission, row, match])
+        db.flush()
+        row.selected_match_id = match.id
+        db.add(SubmissionSelection(row_id=row.id, match_id=match.id, final_price="650000"))
+        db.commit()
+        submission_id = submission.id
+
+    class UpdateUniomClient:
+        calls = []
+
+        async def get_updates(self, offset=None, timeout_seconds=30):
+            self.calls.append((offset, timeout_seconds))
+            return [
+                {
+                    "update_id": 85,
+                    "edited_channel_post": {
+                        "message_id": 124,
+                        "date": 1781681754,
+                        "edit_date": 1781682789,
+                        "chat": {"username": "regaal"},
+                        "text": "کفش تست - 750000 تومان",
+                    },
+                }
+            ]
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr("app.routes.admin.UniomClient", UpdateUniomClient)
+    monkeypatch.setattr("app.routes.admin.settings.admin_password", "secret")
+    monkeypatch.setattr("app.routes.admin.settings.session_secret", "test-cookie")
+    monkeypatch.setattr("app.routes.admin.settings.uniom_bot_token", "test-token")
+
+    app = create_app()
+    app.dependency_overrides[get_db] = override_get_db
+    client = TestClient(app)
+    login = client.post("/admin/login", data={"password": "secret"}, follow_redirects=False)
+    assert login.status_code == 303
+
+    response = client.post(f"/admin/submissions/{submission_id}/eitaa-updates/check", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert UpdateUniomClient.calls == [(85, 30)]
+    with TestingSessionLocal() as db:
+        store = db.query(Store).filter(Store.eitaa_channel_id == "@regaal").one()
+        assert store.eitaa_last_update_id == 85
+        previews = db.query(Submission).filter(Submission.operation == "price_update").all()
+        assert len(previews) == 1
+        preview = previews[0]
+        assert preview.store_id == store.id
+        assert preview.source == "eitaa_update"
+        assert preview.selected_rows == 1
+        assert preview.rows[0].final_price == "750000"
+        assert preview.rows[0].selections[0].match.base_prk == "shoe-base-rk"
+        assert f"/admin/submissions/{preview.id}" in response.headers["location"]
 
 
 def test_eitaa_image_download_failure_does_not_fail_processing(monkeypatch, tmp_path) -> None:
@@ -1741,6 +1853,387 @@ def test_eitaa_preview_groups_review_rows_and_supports_continue(monkeypatch, tmp
     eitaa_page = client.get("/eitaa")
     assert "بررسی محصولات فروشگاه ایتا ناتمام مانده" in eitaa_page.text
     assert "1 محصول نیازمند بررسی مانده" in eitaa_page.text
+
+
+def test_price_update_preview_groups_ready_review_new_and_preserves_batch_operation(tmp_path) -> None:
+    """Human meaning: update previews must show ready updates first, review items second, new products third; submitted update rows must stay marked as price_update in the batch."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    db_path = tmp_path / "test.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(bind=engine)
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app = create_app()
+    app.dependency_overrides[get_db] = override_get_db
+    client = TestClient(app)
+
+    with TestingSessionLocal() as db:
+        submission = Submission(
+            store_name="فروشگاه آپدیت",
+            source="eitaa_update",
+            source_ref="@regaal",
+            operation="price_update",
+            status="ready",
+            price_unit="toman",
+            total_rows=3,
+            selected_rows=1,
+        )
+        db.add(submission)
+        db.commit()
+        db.refresh(submission)
+
+        ready_row = SubmissionRow(
+            submission_id=submission.id,
+            input_row=1,
+            input_product_name="کفش تست",
+            input_price="750000",
+            final_price="750000",
+            operation="price_update",
+        )
+        review_row = SubmissionRow(
+            submission_id=submission.id,
+            input_row=2,
+            input_product_name="محصول نامشخص",
+            input_price="880000",
+            final_price="880000",
+            operation="needs_review",
+            error_message="این محصول نیازمند بررسی است.",
+        )
+        new_row = SubmissionRow(
+            submission_id=submission.id,
+            input_row=3,
+            input_product_name="کیف جدید",
+            input_price="990000",
+            final_price="990000",
+            operation="add",
+        )
+        db.add_all([ready_row, review_row, new_row])
+        db.commit()
+        db.refresh(ready_row)
+        db.refresh(new_row)
+
+        ready_match = TorobMatch(
+            row_id=ready_row.id,
+            source="torob",
+            rank=0,
+            base_prk="shoe-base-rk",
+            name="کفش تست ترب",
+            price=650000,
+        )
+        new_match = TorobMatch(
+            row_id=new_row.id,
+            source="torob",
+            rank=0,
+            base_prk="bag-base-rk",
+            name="کیف جدید ترب",
+            price=990000,
+        )
+        db.add_all([ready_match, new_match])
+        db.commit()
+        db.refresh(ready_match)
+        ready_row.selected_match_id = ready_match.id
+        db.add(SubmissionSelection(row_id=ready_row.id, match_id=ready_match.id, final_price="750000"))
+        db.commit()
+
+        submission_id = submission.id
+        ready_row_id = ready_row.id
+        ready_match_id = ready_match.id
+
+    match_page = client.get(f"/submissions/{submission_id}/match")
+
+    assert match_page.status_code == 200
+    assert match_page.text.index("آماده آپدیت") < match_page.text.index("نیازمند بررسی") < match_page.text.index("محصول جدید")
+    assert "کفش تست ترب" in match_page.text
+    assert "محصول نامشخص" in match_page.text
+    assert "کیف جدید ترب" in match_page.text
+
+    confirm = client.post(
+        f"/submissions/{submission_id}/confirm",
+        data={
+            f"selected_{ready_row_id}": str(ready_match_id),
+            f"price_{ready_row_id}": "750000",
+            "price_unit": "toman",
+            "finish_mode": "continue",
+        },
+    )
+
+    assert confirm.status_code == 200
+    with TestingSessionLocal() as db:
+        submission = db.query(Submission).first()
+        assert len(submission.batches) == 1
+        assert submission.batches[0].items[0].operation == "price_update"
+
+
+def test_excel_price_update_uses_store_history_and_torob_for_new_products(monkeypatch, tmp_path) -> None:
+    """Human meaning: an Excel update should update known store products, and turn unknown-but-searchable rows into new products."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["product_name", "price"])
+    sheet.append(["کفش تست", "750000"])
+    sheet.append(["کیف جدید", "990000"])
+    output = BytesIO()
+    workbook.save(output)
+
+    db_path = tmp_path / "test.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(bind=engine)
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    with TestingSessionLocal() as db:
+        store = Store(name="فروشگاه آپدیت", seller_phone="09120000000")
+        old_submission = Submission(
+            store=store,
+            store_name="فروشگاه آپدیت",
+            seller_phone="09120000000",
+            source="excel",
+            operation="add",
+            status="submitted",
+            price_unit="toman",
+        )
+        old_row = SubmissionRow(
+            submission=old_submission,
+            input_row=1,
+            input_product_name="کفش تست",
+            input_price="650000",
+            final_price="650000",
+            operation="add",
+        )
+        old_match = TorobMatch(
+            row=old_row,
+            source="torob",
+            rank=0,
+            base_prk="shoe-base-rk",
+            name="کفش تست ترب",
+            price=650000,
+        )
+        db.add_all([store, old_submission, old_row, old_match])
+        db.flush()
+        old_row.selected_match_id = old_match.id
+        db.add(SubmissionSelection(row_id=old_row.id, match_id=old_match.id, final_price="650000"))
+        db.commit()
+
+    monkeypatch.setattr("app.routes.seller.ProductSearchClient", FakeProductSearchClient)
+    monkeypatch.setattr("app.routes.seller.SessionLocal", TestingSessionLocal)
+    monkeypatch.setattr("app.routes.seller.settings.upload_dir", str(tmp_path / "uploads"))
+
+    app = create_app()
+    app.dependency_overrides[get_db] = override_get_db
+    client = TestClient(app)
+
+    response = client.post(
+        "/uploads",
+        data={"store_name": "فروشگاه آپدیت", "seller_phone": "09120000000", "operation": "price_update"},
+        files={"file": ("update.xlsx", output.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+
+    assert response.status_code == 200
+    with TestingSessionLocal() as db:
+        preview = db.query(Submission).filter(Submission.operation == "price_update").one()
+        assert preview.source == "excel_update"
+        assert preview.status == "ready"
+        assert preview.price_unit == "toman"
+        assert preview.total_rows == 2
+        assert preview.selected_rows == 1
+        first, second = preview.rows
+        assert first.operation == "price_update"
+        assert first.final_price == "750000"
+        assert first.selections[0].match.base_prk == "shoe-base-rk"
+        assert second.operation == "add"
+        assert second.final_price == "990000"
+        assert second.selections == []
+        assert second.matches
+        preview_id = preview.id
+
+    match_page = client.get(f"/submissions/{preview_id}/match")
+    assert match_page.status_code == 200
+    assert match_page.text.index("آماده آپدیت") < match_page.text.index("محصول جدید")
+
+
+def test_seller_can_create_eitaa_price_update_preview(monkeypatch, tmp_path) -> None:
+    """Human meaning: the seller can ask Torobjan to read new Eitaa updates and receive a review page before anything is sent to Torob."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    db_path = tmp_path / "test.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(bind=engine)
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    with TestingSessionLocal() as db:
+        store = Store(
+            name="فروشگاه ایتا",
+            seller_phone="09120000000",
+            eitaa_channel_id="@regaal",
+            eitaa_last_update_id=84,
+        )
+        old_submission = Submission(
+            store=store,
+            store_name="فروشگاه ایتا",
+            seller_phone="09120000000",
+            source="eitaa",
+            source_ref="@regaal",
+            operation="add",
+            status="submitted",
+            price_unit="toman",
+        )
+        old_row = SubmissionRow(
+            submission=old_submission,
+            input_row=1,
+            input_product_name="کفش تست",
+            input_price="650000",
+            final_price="650000",
+            source_message_id="124",
+            operation="add",
+        )
+        old_match = TorobMatch(
+            row=old_row,
+            source="torob",
+            rank=0,
+            base_prk="shoe-base-rk",
+            name="کفش تست ترب",
+            price=650000,
+        )
+        db.add_all([store, old_submission, old_row, old_match])
+        db.flush()
+        old_row.selected_match_id = old_match.id
+        db.add(SubmissionSelection(row_id=old_row.id, match_id=old_match.id, final_price="650000"))
+        db.commit()
+
+    class UpdateUniomClient:
+        async def get_updates(self, offset=None, timeout_seconds=30):
+            return [
+                {
+                    "update_id": 85,
+                    "edited_channel_post": {
+                        "message_id": 124,
+                        "text": "کفش تست - 750000 تومان",
+                    },
+                },
+                {
+                    "update_id": 86,
+                    "channel_post": {
+                        "message_id": 125,
+                        "text": "کیف جدید - 990000 تومان",
+                    },
+                },
+            ]
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr("app.routes.seller.UniomClient", UpdateUniomClient)
+    monkeypatch.setattr("app.routes.seller.ProductSearchClient", FakeProductSearchClient)
+    monkeypatch.setattr("app.routes.seller.settings.uniom_bot_token", "test-token")
+
+    app = create_app()
+    app.dependency_overrides[get_db] = override_get_db
+    client = TestClient(app)
+
+    response = client.post(
+        "/eitaa/update",
+        data={"store_name": "فروشگاه ایتا", "seller_phone": "09120000000", "channel_id": "regaal"},
+    )
+
+    assert response.status_code == 200
+    assert "آماده آپدیت" in response.text
+    assert "محصول جدید" in response.text
+    with TestingSessionLocal() as db:
+        preview = db.query(Submission).filter(Submission.operation == "price_update").one()
+        assert preview.source == "eitaa_update"
+        assert preview.store.eitaa_last_update_id == 86
+        assert [row.operation for row in preview.rows] == ["price_update", "add"]
+        assert preview.rows[0].selections[0].match.base_prk == "shoe-base-rk"
+        assert preview.rows[1].matches
+
+
+def test_admin_does_not_send_price_update_batches_with_add_endpoint(monkeypatch, tmp_path) -> None:
+    """Human meaning: until Torob gives us an upsert endpoint, update-price batches must not be sent through the add-only endpoint."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    db_path = tmp_path / "test.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(bind=engine)
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    with TestingSessionLocal() as db:
+        submission = Submission(
+            store_name="فروشگاه آپدیت",
+            shop_id="411488",
+            source="excel_update",
+            operation="price_update",
+            status="submitted",
+            price_unit="toman",
+        )
+        row = SubmissionRow(
+            submission=submission,
+            input_row=1,
+            input_product_name="کفش تست",
+            input_price="750000",
+            final_price="750000",
+            operation="price_update",
+            submitted_at=datetime.now(timezone.utc),
+        )
+        match = TorobMatch(row=row, source="torob", rank=0, base_prk="shoe-base-rk", name="کفش تست ترب", price=650000)
+        batch = SubmissionBatch(submission=submission, status="pending")
+        item = SubmissionBatchItem(batch=batch, row=row, match=match, operation="price_update", final_price="750000")
+        db.add_all([submission, row, match, batch, item])
+        db.commit()
+        submission_id = submission.id
+        batch_id = batch.id
+
+    monkeypatch.setattr("app.routes.admin.settings.admin_password", "secret")
+    monkeypatch.setattr("app.routes.admin.settings.session_secret", "test-cookie")
+    monkeypatch.setattr("app.routes.admin.settings.torob_bulk_add_key", "bulk-test-key")
+    monkeypatch.setattr("app.routes.admin.TorobBulkAddClient", FakeTorobBulkAddClient)
+    FakeTorobBulkAddClient.calls = []
+
+    app = create_app()
+    app.dependency_overrides[get_db] = override_get_db
+    client = TestClient(app)
+    assert client.post("/admin/login", data={"password": "secret"}, follow_redirects=False).status_code == 303
+
+    response = client.post(f"/admin/submissions/{submission_id}/batches/{batch_id}/send-torob", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert FakeTorobBulkAddClient.calls == []
+    with TestingSessionLocal() as db:
+        batch = db.query(SubmissionBatch).first()
+        assert batch.status == "failed"
+        assert "upsert" in batch.torob_error_message
 
 
 def test_old_eitaa_draft_forces_toman_without_showing_unit_controls(tmp_path) -> None:

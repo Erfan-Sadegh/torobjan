@@ -5,6 +5,54 @@ from app.services.uniom import UniomClient, UniomClientError
 
 
 @pytest.mark.asyncio
+async def test_uniom_get_updates_sends_offset_timeout_and_allowed_updates(monkeypatch) -> None:
+    client = UniomClient()
+    captured = {}
+
+    async def fake_get_json(method: str, params: dict[str, object]):
+        captured["method"] = method
+        captured["params"] = params
+        return {
+            "ok": True,
+            "result": [
+                {
+                    "update_id": 85,
+                    "edited_channel_post": {
+                        "message_id": 124,
+                        "text": "کفش تست - 750000 تومان",
+                    },
+                }
+            ],
+        }
+
+    monkeypatch.setattr(client, "_get_json", fake_get_json)
+
+    updates = await client.get_updates(offset=85, timeout_seconds=30)
+
+    assert captured["method"] == "getUpdates"
+    assert captured["params"]["offset"] == 85
+    assert captured["params"]["timeout"] == 30
+    assert "channel_post" in str(captured["params"]["allowed_updates"])
+    assert "edited_channel_post" in str(captured["params"]["allowed_updates"])
+    assert updates[0]["update_id"] == 85
+
+
+@pytest.mark.asyncio
+async def test_uniom_get_updates_rejects_unusable_response(monkeypatch) -> None:
+    client = UniomClient()
+
+    async def fake_get_json(method: str, params: dict[str, object]):
+        return {"ok": True, "result": {"not": "a list"}}
+
+    monkeypatch.setattr(client, "_get_json", fake_get_json)
+
+    with pytest.raises(UniomClientError) as exc:
+        await client.get_updates(offset=None, timeout_seconds=1)
+
+    assert exc.value.code == "uniom_bad_response"
+
+
+@pytest.mark.asyncio
 async def test_uniom_history_pagination_deduplicates_and_offsets(monkeypatch) -> None:
     client = UniomClient()
     calls = []

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import asyncio
+import json
 from urllib.parse import quote
 
 import httpx
@@ -77,6 +78,28 @@ class UniomClient:
             fallback_page_size = min(page_size, fallback_page_size + 5)
             await asyncio.sleep(0.2)
         return messages[:total_limit]
+
+    async def get_updates(
+        self,
+        offset: int | None = None,
+        timeout_seconds: int = 30,
+        allowed_updates: list[str] | None = None,
+    ) -> list[dict]:
+        params: dict[str, object] = {
+            "timeout": max(0, int(timeout_seconds)),
+            "limit": 100,
+            "allowed_updates": json.dumps(
+                allowed_updates or ["channel_post", "edited_channel_post"],
+                ensure_ascii=False,
+            ),
+        }
+        if offset is not None:
+            params["offset"] = offset
+        data = await self._get_json("getUpdates", params)
+        result = data.get("result")
+        if not isinstance(result, list):
+            raise UniomClientError("uniom_bad_response", "پاسخ آپدیت‌های ایتا قابل پردازش نبود.")
+        return [item for item in result if isinstance(item, dict)]
 
     async def get_file(self, file_id: str) -> UniomFile:
         data = await self._get_json("getFile", {"file_id": file_id})

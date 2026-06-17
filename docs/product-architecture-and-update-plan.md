@@ -192,6 +192,72 @@ getUpdates: بگو از آخرین بار چه اتفاق جدیدی رخ داد
 
 برای آپدیت های بعدی، `getUpdates` مناسب تر است.
 
+### long polling چیست؟
+
+Long polling یعنی سیستم ما از Uniom می پرسد:
+
+```text
+اگر اتفاق جدیدی داری، همین الان بده.
+اگر نداری، چند ثانیه صبر کن؛ شاید در همین چند ثانیه اتفاق جدیدی رسید.
+اگر باز هم چیزی نرسید، جواب خالی بده.
+```
+
+این با polling ساده فرق دارد.
+
+Polling ساده یعنی مثلا هر ۵ ثانیه یک درخواست خیلی کوتاه بزنیم:
+
+```text
+چیزی هست؟
+نه.
+۵ ثانیه بعد...
+چیزی هست؟
+نه.
+۵ ثانیه بعد...
+چیزی هست؟
+بله.
+```
+
+Long polling یعنی هر درخواست می تواند چند ثانیه باز بماند:
+
+```text
+چیزی هست؟ اگر نیست تا ۳۰ ثانیه صبر کن.
+...
+در ثانیه ۱۲ یک پست جدید آمد.
+Uniom همان لحظه جواب می دهد.
+```
+
+چرا این بهتر است؟
+
+1. تعداد درخواست های بیهوده کمتر می شود.
+2. اگر پست جدید بیاید، معمولا زودتر از polling ساده متوجه می شویم.
+3. برای سیستم آپدیت ایتا، لازم نیست هر لحظه با فشار زیاد تاریخچه کانال را بخوانیم.
+
+مثال خیلی ساده:
+
+```text
+getUpdates(timeout=30, offset=103)
+```
+
+یعنی:
+
+```text
+از update شماره ۱۰۳ به بعد را بده.
+اگر الان چیزی نداری، حداکثر ۳۰ ثانیه منتظر بمان.
+```
+
+اگر در این ۳۰ ثانیه پست جدید یا ویرایش پست برسد، Uniom همان را برمی گرداند.
+
+اگر هیچ اتفاقی نیفتد، جواب تقریبا این شکلی است:
+
+```json
+{
+  "ok": true,
+  "result": []
+}
+```
+
+نکته مهم: جواب خالی همیشه خطا نیست. گاهی فقط یعنی در این بازه اتفاق جدیدی نیفتاده است.
+
 ### update چیست؟
 
 Update یعنی یک رویداد جدید.
@@ -263,6 +329,26 @@ offset=103
 ```
 
 اگر offset را زود جلو ببریم، ممکن است یک update را از دست بدهیم. برای همین اول preview را ذخیره می کنیم، بعد `last_update_id` را جلو می بریم.
+
+یک مثال واقعی تر:
+
+```text
+آخرین update ذخیره شده در دیتابیس: 102
+درخواست بعدی ما: getUpdates(offset=103)
+Uniom جواب می دهد:
+  update_id=103
+  update_id=104
+```
+
+سیستم باید اول updateهای ۱۰۳ و ۱۰۴ را تبدیل به preview کند و در دیتابیس ذخیره کند.
+
+بعد از اینکه ذخیره موفق شد:
+
+```text
+last_update_id = 104
+```
+
+اگر وسط کار خطا شد، `last_update_id` را جلو نمی بریم. دفعه بعد دوباره از `103` می خوانیم. شاید یک update دوباره بررسی شود، ولی update از دست نمی رود. برای MVP این رفتار بهتر از این است که قیمت جدید فروشنده را گم کنیم.
 
 ### httpx چیست؟
 
@@ -634,7 +720,9 @@ getChat
 getChatHistory
 ```
 
-نتیجه:
+### تست اولیه
+
+در تست اولیه، `getUpdates` در دسترس بود اما update جدیدی برنمی گرداند:
 
 ```text
 getUpdates: 200 OK
@@ -668,47 +756,80 @@ photo برگشت.
 
 پس برای ایمپورت اولیه، مسیر فعلی درست کار می کند.
 
-برای اثبات نهایی getUpdates باید در کانال تست یک پست جدید یا یک ویرایش واقعی انجام شود، چون الان update معوقی وجود نداشت.
+برای اثبات نهایی `getUpdates` باید در کانال تست یک پست جدید یا یک ویرایش واقعی انجام شود.
 
 ### تست تکمیلی با کانال @regaal
 
-برای بررسی عملی تر، در کانال `@regaal` یک پست جدید و یک ویرایش انجام شد و دوباره تست گرفتیم.
+برای بررسی عملی تر، در کانال `@regaal` پست جدید و ویرایش انجام شد.
 
-نتیجه:
+در یک مرحله، `getChatHistory` پست جدید را می دید، اما `getUpdates` هنوز خالی بود. این یعنی دسترسی به تاریخچه کانال وجود داشت، ولی update stream هنوز فعال یا آماده نبود.
+
+بعد از اصلاح Uniom توسط سازنده، تست دوباره انجام شد.
+
+نتیجه جدید:
 
 ```text
 getUpdates: 200 OK
 ok: true
-result: []
+result:
+  update_id: 84
+  type: channel_post
+  message_id: 124
+  chat_username: regaal
+  has_text: true
 ```
 
-یعنی endpoint کار می کند، اما هنوز update جدیدی به صف `getUpdates` این token نرسیده بود.
+یعنی `getUpdates` حالا پست جدید کانال را واقعا برمی گرداند.
 
-در همان زمان `getChatHistory` برای `@regaal` پست جدید را دید:
+بعد از یک ویرایش جدید روی همان پست، دوباره تست شد:
 
 ```text
-message_id: 121
+getUpdates: 200 OK
+ok: true
+result:
+  update_id: 85
+  type: edited_channel_post
+  message_id: 124
+  chat_username: regaal
+  has_text: true
+  edit_date: 1781682789
+```
+
+یعنی Uniom هم پست جدید کانال را می دهد و هم ویرایش همان پست را.
+
+در همان تست، `getWebhookInfo` هم این را نشان داد:
+
+```text
+url: ""
+pending_update_count: 13
+allowed_updates: ["channel_post", "edited_channel_post", "edited_message", "message"]
+```
+
+معنی:
+
+1. webhook فعال نیست، پس long polling مسیر درست است.
+2. Uniom حالا `channel_post` را وارد صف `getUpdates` می کند.
+3. برای پیاده سازی واقعی باید `offset` ذخیره شود، وگرنه همان update ممکن است چند بار دیده شود.
+
+در همین تست، `getChatHistory` برای `@regaal` هم همان پست های کانال را می دید:
+
+```text
+message_id: 124
 has_text: true
 has_photo: false
 ```
 
-نتیجه عملی:
+پس وضعیت فعلی:
 
 ```text
-دسترسی به تاریخچه کانال وجود دارد.
-اما باید از Uniom بپرسیم چرا پست/ویرایش جدید در getUpdates برنمی گردد.
+getChatHistory برای ایمپورت اولیه کار می کند.
+getUpdates برای تشخیص پست جدید کانال کار می کند.
+getUpdates برای تشخیص ویرایش پست کانال هم کار می کند.
 ```
 
-سؤال دقیق از Uniom:
+نکته درباره SDK:
 
-```text
-ما با همین token، getChatHistory کانال @regaal را می خوانیم و پیام جدید را می بینیم.
-getWebhookInfo هم url خالی و allowed_updates شامل channel_post و edited_channel_post نشان می دهد.
-اما getUpdates بعد از پست جدید و ویرایش پست، result=[] برمی گرداند.
-آیا برای دریافت channel_post/edited_channel_post از ایتا با getUpdates تنظیم دیگری لازم است؟
-آیا اکانت باید نقش خاصی در کانال داشته باشد؟
-آیا getUpdates فقط برای پیام های بعد از زمان خاصی یا فقط برای بعضی نوع اتصال ها کار می کند؟
-```
+اگر SDK تلگرام فقط همین endpoint را صدا بزند، از نظر خروجی تفاوت بنیادی ندارد. تفاوت اصلی SDK این است که loop، offset، و long polling را آماده تر مدیریت می کند. ما می توانیم برای MVP با `httpx` همین رفتار را مستقیم بسازیم، چون کنترل و تست پذیری بیشتری داریم. اگر بعدا دیدیم SDK Uniom رفتار اختصاصی یا پایدارتری دارد، می توانیم client را عوض کنیم بدون اینکه منطق محصول را عوض کنیم.
 
 ## طراحی آپدیت قیمت با ایتا
 
@@ -740,6 +861,52 @@ getWebhookInfo هم url خالی و allowed_updates شامل channel_post و edi
 2. نیاز به زیرساخت worker ندارد.
 3. ریسک پردازش همزمان کمتر است.
 4. برای MVP کافی است.
+
+### long polling در نسخه on-demand چطور کار می کند؟
+
+در نسخه on-demand، سیستم همیشه پشت صحنه روشن نیست که کانال را گوش کند.
+
+فروشنده یا ادمین دکمه می زند:
+
+```text
+بررسی قیمت های جدید ایتا
+```
+
+بعد سیستم این کارها را انجام می دهد:
+
+```text
+1. از دیتابیس می خواند آخرین update پردازش شده چند بوده.
+2. مثلا می بیند last_update_id = 102.
+3. به Uniom درخواست می زند:
+   getUpdates(offset=103, timeout=30)
+4. Uniom اگر update آماده داشته باشد، سریع جواب می دهد.
+5. اگر update آماده نداشته باشد، تا ۳۰ ثانیه منتظر می ماند.
+6. اگر پست جدید یا ادیت جدید برسد، همان را برمی گرداند.
+7. اگر هیچ اتفاقی نیفتد، result خالی برمی گرداند.
+```
+
+برای فروشنده، این یعنی سیستم بدون فشار اضافه بررسی می کند آیا کانال از دفعه قبل تغییری داشته یا نه.
+
+چرا به جای `getChatHistory` برای آپدیت از `getUpdates` استفاده می کنیم؟
+
+```text
+getChatHistory:
+  هر بار بخشی از تاریخچه کانال را دوباره می خواند.
+  برای ایمپورت اولیه خوب است.
+  برای آپدیت های مکرر ممکن است کار تکراری زیاد بسازد.
+
+getUpdates:
+  فقط اتفاق های جدید از دفعه قبل را می دهد.
+  برای آپدیت قیمت مناسب تر است.
+  نیاز دارد offset/last_update_id را درست ذخیره کنیم.
+```
+
+پس برای آپدیت قیمت، اصل طراحی این است:
+
+```text
+اولین بار: getChatHistory برای ساختن محصول های اولیه.
+بعد از آن: getUpdates برای دیدن پست ها و ادیت های جدید.
+```
 
 ### last_update_id چیست؟
 
@@ -1142,14 +1309,14 @@ message_id=800
 
 برای همین Store لازم داریم.
 
-مدل پیشنهادی:
+مدل پیاده شده:
 
 ```text
 Store
   id
   name
   seller_phone
-  torob_shop_id
+  shop_id
   eitaa_channel_id
   eitaa_last_update_id
 ```
@@ -1160,6 +1327,18 @@ Submissionها به Store وصل می شوند:
 Store
  └── Submission
 ```
+
+در کد فعلی:
+
+```text
+app/models.py
+
+Store.eitaa_last_update_id
+Submission.store_id
+Submission.operation
+```
+
+یعنی آخرین `offset` ایتا در همان دیتابیس اصلی محصول ذخیره می شود؛ روی production این دیتابیس Postgres همروش است و روی local معمولا SQLite است.
 
 ## آیا StoreProduct لازم است؟
 
@@ -1256,6 +1435,17 @@ attempt_count
 ```text
 برای هر فروشگاه و هر base_prk، جدیدترین قیمت باید برنده باشد.
 ```
+
+معیار دقیق جدیدترین بودن:
+
+```text
+store_id یا shop_id: فروشگاه واقعی
+base_prk: محصول واقعی ترب
+created_at / id: ترتیب ساخته شدن عملیات در سیستم خودمان
+status: معتبر بودن یا superseded بودن آیتم
+```
+
+پس latest-wins از روی نام محصول تصمیم نمی گیرد. نام محصول ممکن است کمی عوض شود، مثلا «رب روژین ۸۰۰ گرم» و «رب گوجه روژین ۸۰۰». معیار قابل اتکا این است که هر دو به همان `base_prk` ترب وصل شده باشند.
 
 مثال:
 
@@ -1365,26 +1555,51 @@ index در پاسخ نسبت به همان request است؟
 ### تست های Uniom getUpdates
 
 ```text
-test_uniom_get_updates_sends_offset_and_allowed_updates
-test_uniom_get_updates_maps_bad_response
+test_uniom_get_updates_sends_offset_timeout_and_allowed_updates
+test_uniom_get_updates_rejects_unusable_response
+```
+
+معنی غیر فنی:
+
+```text
+وقتی می گوییم از update شماره ۸۵ به بعد را بخوان، واقعا offset=85 به Uniom ارسال شود.
+اگر Uniom جواب خراب یا غیرقابل استفاده داد، سیستم آن را بی صدا قبول نکند.
+```
+
+تست های بعدی لازم برای خطاهای شبکه:
+
+```text
 test_uniom_get_updates_maps_503_to_public_error
 ```
 
 ### تست های Store و cursor
 
 ```text
-test_store_remembers_eitaa_last_update_id
-test_eitaa_update_does_not_advance_offset_when_preview_fails
-test_eitaa_update_advances_offset_after_preview_is_saved
+test_eitaa_import_links_submission_to_store
+test_admin_can_create_eitaa_update_preview_from_uniom_updates
+```
+
+معنی غیر فنی:
+
+```text
+وقتی فروشنده کانال ایتا را وارد می کند، سیستم باید بفهمد این کانال متعلق به کدام Store است.
+وقتی ادمین بررسی آپدیت را می زند، سیستم باید از آخرین update ذخیره شده به بعد را بخواند.
 ```
 
 ### تست های آپدیت ایتا
 
 ```text
-test_eitaa_update_detects_edited_known_message_price_change
-test_eitaa_update_unknown_message_auto_selects_exact_match
-test_eitaa_update_unknown_message_requires_review_for_ambiguous_match
-test_eitaa_update_preview_does_not_send_to_torob
+test_eitaa_update_preview_reuses_known_message_match_and_advances_store_cursor
+test_eitaa_update_preview_keeps_unknown_message_for_review_and_advances_cursor
+test_eitaa_update_preview_ignores_old_updates_without_moving_cursor_back
+```
+
+معنی غیر فنی:
+
+```text
+اگر پست ویرایش شده قبلا به یک محصول ترب وصل بوده، قیمت جدید با همان محصول ترب پیش نمایش شود.
+اگر پست جدید است و محصول تربش را نمی شناسیم، حذف نشود؛ برای بررسی دستی نگه داشته شود.
+اگر update قدیمی تر از چیزی است که قبلا دیده ایم، cursor فروشگاه عقب نرود.
 ```
 
 ### تست های آپدیت اکسل
@@ -1415,10 +1630,12 @@ test_newer_item_supersedes_only_same_shop_and_base_prk
 
 ### فاز 2: Store
 
-1. جدول Store اضافه شود.
-2. Submissionها به Store وصل شوند.
-3. shop_id روی Store نگه داشته شود.
-4. eitaa_channel_id و eitaa_last_update_id روی Store ذخیره شود.
+وضعیت: پیاده شده.
+
+1. جدول Store اضافه شد.
+2. Submissionهای مسیر ایتا به Store وصل می شوند.
+3. shop_id روی Store هم نگه داشته می شود.
+4. eitaa_channel_id و eitaa_last_update_id روی Store ذخیره می شود.
 
 ### فاز 3: آپدیت اکسل
 
@@ -1458,16 +1675,21 @@ Batch و BatchItem پایه
 خروجی اکسل
 ```
 
-طراحی شده ولی هنوز پیاده نشده:
+طراحی شده و بخشی از آن پیاده شده:
 
 ```text
-Store
+Store: پیاده شده
+Uniom getUpdates داخل کد محصول: پیاده شده
+Preview آپدیت قیمت برای ایتا: پیاده شده تا قبل از ارسال به ترب
+```
+
+طراحی شده ولی هنوز کامل پیاده نشده:
+
+```text
 BatchItem status per-item
 Upsert price
 Update flow برای اکسل
-Update flow برای ایتا
-Uniom getUpdates داخل کد محصول
-Preview آپدیت قیمت
+ارسال نهایی آپدیت قیمت به ترب
 ```
 
 نیازمند تایید بیرونی:
@@ -1475,5 +1697,4 @@ Preview آپدیت قیمت
 ```text
 رفتار upsert endpoint ترب
 پاسخ per-item برای updated و unchanged
-نمونه واقعی getUpdates بعد از پست جدید یا ویرایش‌شده در ایتا
 ```

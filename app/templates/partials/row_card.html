@@ -1,4 +1,5 @@
-{% set is_eitaa = row.submission and row.submission.source == "eitaa" %}
+{% set is_eitaa = row.submission and row.submission.source in ["eitaa", "eitaa_update"] %}
+{% set is_update = row.submission and row.submission.operation == "price_update" %}
 <article class="row-card" id="row-{{ row.id }}" {% if row.matches and not row.error_message %}data-selectable-row="true"{% endif %}>
   <div class="row-head">
     <div>
@@ -26,6 +27,10 @@
     </div>
     {% if row.error_message %}
       <span class="badge warn">بدون نتیجه</span>
+    {% elif is_update and row.operation == "price_update" %}
+      <span class="badge choice-badge">آماده آپدیت</span>
+    {% elif is_update and row.operation == "add" %}
+      <span class="badge choice-badge">محصول جدید</span>
     {% elif is_eitaa %}
       <span class="badge choice-badge">پیشنهاد ترب</span>
     {% else %}
