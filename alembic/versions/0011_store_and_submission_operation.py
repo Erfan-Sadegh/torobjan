@@ -1,6 +1,6 @@
 """store and submission operation
 
-Revision ID: 0011_store_and_submission_operation
+Revision ID: 0011_store_submission_op
 Revises: 0010_eitaa_submission_source
 Create Date: 2026-06-17
 """
@@ -10,7 +10,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "0011_store_and_submission_operation"
+revision: str = "0011_store_submission_op"
 down_revision: Union[str, None] = "0010_eitaa_submission_source"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

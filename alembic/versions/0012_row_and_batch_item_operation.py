@@ -1,7 +1,7 @@
 """row and batch item operation
 
-Revision ID: 0012_row_and_batch_item_operation
-Revises: 0011_store_and_submission_operation
+Revision ID: 0012_row_batch_item_op
+Revises: 0011_store_submission_op
 Create Date: 2026-06-17
 """
 from typing import Sequence, Union
@@ -10,8 +10,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "0012_row_and_batch_item_operation"
-down_revision: Union[str, None] = "0011_store_and_submission_operation"
+revision: str = "0012_row_batch_item_op"
+down_revision: Union[str, None] = "0011_store_submission_op"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
