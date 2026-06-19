@@ -2068,6 +2068,178 @@ def test_excel_price_update_uses_store_history_and_torob_for_new_products(monkey
     assert match_page.text.index("آماده آپدیت") < match_page.text.index("محصول جدید")
 
 
+def test_excel_price_update_ignores_rows_when_price_did_not_change(monkeypatch, tmp_path) -> None:
+    """Human meaning: uploading the same Excel again as a price update should not create fake update work."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["product_name", "price"])
+    sheet.append(["test tomato paste 800g", "6500000"])
+    output = BytesIO()
+    workbook.save(output)
+
+    db_path = tmp_path / "test.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(bind=engine)
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    with TestingSessionLocal() as db:
+        store = Store(name="Update Store", seller_phone="09120000000")
+        old_submission = Submission(
+            store=store,
+            store_name="Update Store",
+            seller_phone="09120000000",
+            source="excel",
+            operation="add",
+            status="submitted",
+            price_unit="rial",
+        )
+        old_row = SubmissionRow(
+            submission=old_submission,
+            input_row=1,
+            input_product_name="test tomato paste 800g",
+            input_price="6500000",
+            final_price="650000",
+            operation="add",
+            submitted_at=datetime.now(timezone.utc),
+        )
+        old_match = TorobMatch(
+            row=old_row,
+            source="torob",
+            rank=0,
+            base_prk="tomato-paste-base-rk",
+            name="test tomato paste 800g torob",
+            price=650000,
+        )
+        db.add_all([store, old_submission, old_row, old_match])
+        db.flush()
+        old_row.selected_match_id = old_match.id
+        db.add(SubmissionSelection(row_id=old_row.id, match_id=old_match.id, final_price="650000"))
+        db.commit()
+
+    monkeypatch.setattr("app.routes.seller.ProductSearchClient", FakeProductSearchClient)
+    monkeypatch.setattr("app.routes.seller.SessionLocal", TestingSessionLocal)
+    monkeypatch.setattr("app.routes.seller.settings.upload_dir", str(tmp_path / "uploads"))
+
+    app = create_app()
+    app.dependency_overrides[get_db] = override_get_db
+    client = TestClient(app)
+
+    response = client.post(
+        "/uploads",
+        data={"store_name": "Update Store", "seller_phone": "09120000000", "operation": "price_update"},
+        files={"file": ("same-prices.xlsx", output.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+
+    assert response.status_code == 200
+    with TestingSessionLocal() as db:
+        preview = db.query(Submission).filter(Submission.operation == "price_update").one()
+        assert preview.status == "ready"
+        assert preview.selected_rows == 0
+        assert preview.price_unit == "rial"
+        assert preview.rows[0].operation == "unchanged"
+        assert preview.rows[0].selections == []
+
+    match_page = client.get(f"/submissions/{preview.id}/match")
+    assert match_page.status_code == 200
+    assert "test tomato paste 800g" not in match_page.text
+
+
+def test_excel_price_update_match_page_does_not_require_price_unit_choice(monkeypatch, tmp_path) -> None:
+    """Human meaning: Excel price updates are stored in Toman, so the seller must not see the Rial/Toman blocker."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["product_name", "price"])
+    sheet.append(["test tomato paste 800g", "7500000"])
+    output = BytesIO()
+    workbook.save(output)
+
+    db_path = tmp_path / "test.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(bind=engine)
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    with TestingSessionLocal() as db:
+        store = Store(name="Update Store", seller_phone="09120000000")
+        old_submission = Submission(
+            store=store,
+            store_name="Update Store",
+            seller_phone="09120000000",
+            source="excel",
+            operation="add",
+            status="submitted",
+            price_unit="rial",
+        )
+        old_row = SubmissionRow(
+            submission=old_submission,
+            input_row=1,
+            input_product_name="test tomato paste 800g",
+            input_price="6500000",
+            final_price="650000",
+            operation="add",
+            submitted_at=datetime.now(timezone.utc),
+        )
+        old_match = TorobMatch(
+            row=old_row,
+            source="torob",
+            rank=0,
+            base_prk="tomato-paste-base-rk",
+            name="test tomato paste 800g torob",
+            price=650000,
+        )
+        db.add_all([store, old_submission, old_row, old_match])
+        db.flush()
+        old_row.selected_match_id = old_match.id
+        db.add(SubmissionSelection(row_id=old_row.id, match_id=old_match.id, final_price="650000"))
+        db.commit()
+
+    monkeypatch.setattr("app.routes.seller.ProductSearchClient", FakeProductSearchClient)
+    monkeypatch.setattr("app.routes.seller.SessionLocal", TestingSessionLocal)
+    monkeypatch.setattr("app.routes.seller.settings.upload_dir", str(tmp_path / "uploads"))
+
+    app = create_app()
+    app.dependency_overrides[get_db] = override_get_db
+    client = TestClient(app)
+
+    response = client.post(
+        "/uploads",
+        data={"store_name": "Update Store", "seller_phone": "09120000000", "operation": "price_update"},
+        files={"file": ("changed-price.xlsx", output.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+
+    assert response.status_code == 200
+    with TestingSessionLocal() as db:
+        preview = db.query(Submission).filter(Submission.operation == "price_update").one()
+        preview_id = preview.id
+
+    match_page = client.get(f"/submissions/{preview_id}/match")
+
+    assert match_page.status_code == 200
+    assert 'name="price_unit" value="rial"' in match_page.text
+    assert '<div class="price-unit-card" data-price-unit-card>' not in match_page.text
+    assert "قیمت‌ها ریال هست یا تومان؟" not in match_page.text
+    assert "اول مشخص کن قیمت‌ها به تومان هستند یا ریال." not in match_page.text
+
+
 def test_seller_can_create_eitaa_price_update_preview(monkeypatch, tmp_path) -> None:
     """Human meaning: the seller can ask Torobjan to read new Eitaa updates and receive a review page before anything is sent to Torob."""
     from sqlalchemy import create_engine

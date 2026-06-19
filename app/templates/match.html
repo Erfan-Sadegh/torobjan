@@ -394,7 +394,7 @@
         showInlineFormError("برای کالاهای انتخاب‌شده، قیمت نهایی را وارد کن.");
         return;
       }
-      {% if not is_eitaa %}
+      {% if not is_eitaa and not is_update %}
         const unitInput = document.querySelector("[data-price-unit-value]");
         if (unitInput && !unitInput.value) {
           showInlineFormError("اول مشخص کن قیمت‌ها به تومان هستند یا ریال.");

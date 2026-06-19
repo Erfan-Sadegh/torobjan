@@ -19,7 +19,7 @@ from app.services.excel import ExcelParseError, build_template_xlsx, parse_price
 from app.services.product_search import ProductSearchClient, ProductSearchError
 from app.services.torob import TorobClient, TorobClientError, TorobSearchResult
 from app.services.uniom import UniomClient, UniomClientError
-from app.services.update_matching import copy_match_for_row, find_known_store_match
+from app.services.update_matching import copy_match_for_row, find_known_store_match, find_known_store_product
 from app.settings import settings
 from app.template_utils import create_templates
 
@@ -192,6 +192,7 @@ async def upload_products(
             )
     else:
         store = _get_or_create_excel_store(db, store_name, seller_phone)
+    price_unit = _store_price_unit_for_update(db, store.id) if operation == "price_update" and store is not None else None
     submission = Submission(
         store=store,
         store_name=store_name,
@@ -199,7 +200,7 @@ async def upload_products(
         shop_id=store.shop_id if store else None,
         source="excel_update" if operation == "price_update" else "excel",
         operation=operation,
-        price_unit="toman" if operation == "price_update" else None,
+        price_unit=price_unit,
         original_filename=file.filename,
         status="processing",
     )
@@ -436,21 +437,30 @@ async def process_excel_update_submission(submission_id: int) -> None:
         submission = _get_submission(db, submission_id)
         rows = [row for row in submission.rows if row.input_product_name and not row.error_message]
         for row in rows:
-            row.final_price = row.input_price
-            if not row.input_price:
+            new_price = _normalize_final_price(row.input_price, submission.price_unit or "toman")
+            row.final_price = new_price
+            if not new_price:
                 row.operation = "needs_review"
                 row.error_message = "برای آپدیت قیمت، قیمت جدید این ردیف در فایل مشخص نشده است."
                 db.commit()
                 continue
 
-            known_match = find_known_store_match(db, submission.store_id, row.input_product_name or "")
-            if known_match is not None:
+            known_product = find_known_store_product(db, submission.store_id, row.input_product_name or "")
+            if known_product is not None:
+                previous_price = _normalize_final_price(known_product.final_price, "toman")
+                if previous_price == new_price:
+                    row.operation = "unchanged"
+                    row.error_message = None
+                    row.selected_match_id = None
+                    row.has_more_matches = False
+                    db.commit()
+                    continue
                 row.operation = "price_update"
-                match = copy_match_for_row(row.id, known_match)
+                match = copy_match_for_row(row.id, known_product.match)
                 db.add(match)
                 db.flush()
                 row.selected_match_id = match.id
-                db.add(SubmissionSelection(row_id=row.id, match_id=match.id, final_price=row.input_price))
+                db.add(SubmissionSelection(row_id=row.id, match_id=match.id, final_price=new_price))
                 db.commit()
                 continue
 
@@ -1282,6 +1292,18 @@ def _store_has_added_products(db: Session, store_id: int) -> bool:
     )
 
 
+def _store_price_unit_for_update(db: Session, store_id: int) -> str:
+    submission = (
+        db.query(Submission)
+        .filter(Submission.store_id == store_id)
+        .filter(Submission.operation == "add")
+        .filter(Submission.price_unit.in_(["toman", "rial"]))
+        .order_by(Submission.id.desc())
+        .first()
+    )
+    return submission.price_unit if submission and submission.price_unit in {"toman", "rial"} else "toman"
+
+
 async def _search_update_products_in_torob(updates: list[dict], search_client: ProductSearchClient) -> dict[str, list]:
     results_by_name: dict[str, list] = {}
     for update in updates:
@@ -1366,6 +1388,8 @@ def _save_submission_selections(form, submission: Submission, db: Session, mark_
         submission.price_unit = "toman"
     elif submitted_price_unit in {"toman", "rial"}:
         submission.price_unit = submitted_price_unit
+    elif submission.operation == "price_update" and not submission.price_unit:
+        submission.price_unit = "toman"
     price_unit = submission.price_unit or "toman"
     submitted_count = 0
     submitted_timestamp = utc_now() if mark_submitted else None
@@ -1518,7 +1542,10 @@ def _display_row_numbers(submission: Submission) -> dict[int, int]:
 
 
 def _visible_selection_rows(submission: Submission) -> list[SubmissionRow]:
-    return [row for row in submission.rows if row.submitted_at is None]
+    rows = [row for row in submission.rows if row.submitted_at is None]
+    if submission.operation == "price_update":
+        return [row for row in rows if row.operation != "unchanged"]
+    return rows
 
 
 def _remaining_selectable_count(submission: Submission) -> int:
@@ -1571,7 +1598,7 @@ def _get_resume_state(db: Session, cookie_value: str | None, source: str = "exce
 
 
 def _price_unit_row_ids(submission: Submission, rows: list[SubmissionRow] | None = None) -> set[int]:
-    if submission.price_unit or submission.source in {"eitaa", "eitaa_update"}:
+    if submission.price_unit or submission.source in {"eitaa", "eitaa_update"} or submission.operation == "price_update":
         return set()
     candidate_rows = rows if rows is not None else _visible_selection_rows(submission)
     valid_rows = [row for row in candidate_rows if row.input_product_name and row.matches and not row.error_message]

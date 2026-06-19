@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from sqlalchemy.orm import Session
 
 from app.models import Submission, SubmissionRow, TorobMatch
@@ -7,7 +9,19 @@ from app.services.eitaa import score_product_match
 from app.settings import settings
 
 
+@dataclass(frozen=True)
+class KnownStoreProduct:
+    row: SubmissionRow
+    match: TorobMatch
+    final_price: str | None
+
+
 def find_known_store_match(db: Session, store_id: int | None, product_name: str) -> TorobMatch | None:
+    product = find_known_store_product(db, store_id, product_name)
+    return product.match if product is not None else None
+
+
+def find_known_store_product(db: Session, store_id: int | None, product_name: str) -> KnownStoreProduct | None:
     if store_id is None or not product_name:
         return None
     rows = (
@@ -20,6 +34,7 @@ def find_known_store_match(db: Session, store_id: int | None, product_name: str)
         .all()
     )
     best_row: SubmissionRow | None = None
+    best_match: TorobMatch | None = None
     best_score = 0.0
     for row in rows:
         match = _selected_match(row)
@@ -32,9 +47,10 @@ def find_known_store_match(db: Session, store_id: int | None, product_name: str)
         if score > best_score:
             best_score = score
             best_row = row
-    if best_row is None or best_score < settings.eitaa_auto_match_threshold:
+            best_match = match
+    if best_row is None or best_match is None or best_score < settings.eitaa_auto_match_threshold:
         return None
-    return _selected_match(best_row)
+    return KnownStoreProduct(row=best_row, match=best_match, final_price=_selected_final_price(best_row))
 
 
 def copy_match_for_row(row_id: int, match: TorobMatch) -> TorobMatch:
@@ -73,3 +89,9 @@ def _selected_match(row: SubmissionRow) -> TorobMatch | None:
     if row.selections:
         return row.selections[-1].match
     return None
+
+
+def _selected_final_price(row: SubmissionRow) -> str | None:
+    if row.selections:
+        return row.selections[-1].final_price
+    return row.final_price
