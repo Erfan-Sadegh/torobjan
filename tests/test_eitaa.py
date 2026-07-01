@@ -200,3 +200,74 @@ def test_extract_eitaa_products_reads_underscore_price_list_lines() -> None:
         ("کلم سفید و قرمز", "45000"),
         ("خیار درجه یک", "95000"),
     ]
+
+
+def test_extract_eitaa_products_prefers_product_line_over_marketing_headline_for_holder() -> None:
+    """Non-developer meaning: the parser should search Torob for the actual holder name, not the catchy first sentence."""
+    messages = [
+        {
+            "message_id": 5400,
+            "date": 1755439769,
+            "text": """دستت آزاد، گوشی سر جاش ✨📱
+هولدر Yesido، همیشه و همه‌جا همراهته!
+
+چه تو ماشین، چه خونه، چه محل کار، گوشیت رو محکم و باحال نگه می‌داره 💪
+طراحی بادوام، نصب آسون، و زاویه دید عالی برای تماشای فیلم، مسیریابی یا تماس تصویری 😍
+
+قیمت: ۳۰۰۰۰۰ تومان""",
+            "photo": [{"file_id": "holder-photo", "width": 900, "height": 900}],
+        }
+    ]
+
+    products = extract_eitaa_products(messages, max_products=10)
+
+    assert len(products) == 1
+    assert products[0].product_name == "هولدر Yesido"
+    assert products[0].price_toman == "300000"
+    assert products[0].best_photo.file_id == "holder-photo"
+
+
+def test_extract_eitaa_products_prefers_product_line_over_marketing_headline_for_headphone() -> None:
+    """Non-developer meaning: the parser should search Torob for P47 headphones, not the generic sound-experience title."""
+    messages = [
+        {
+            "message_id": 5401,
+            "date": 1755439769,
+            "text": """تجربه‌ای متفاوت از دنیای صدا ✨🎧
+هدفون بیسیم P47 فقط یه هدفون نیست، یه همراه پیشرفته و کاربردیه که سال‌ها باهات می‌مونه!
+
+ترکیبی منحصربه‌فرد از طراحی جذاب، امکانات کاربردی و قابلیت‌های پیشرفته 💥
+
+قیمت: ۵۰۰۰۰۰ تومان""",
+            "photo": [{"file_id": "headphone-photo", "width": 900, "height": 900}],
+        }
+    ]
+
+    products = extract_eitaa_products(messages, max_products=10)
+
+    assert len(products) == 1
+    assert products[0].product_name == "هدفون بیسیم P47"
+    assert products[0].price_toman == "500000"
+    assert products[0].best_photo.file_id == "headphone-photo"
+
+
+def test_extract_eitaa_products_prefers_jewelry_name_over_neck_marketing_headline() -> None:
+    """Non-developer meaning: the parser should search Torob for the necklace, not the playful headline."""
+    messages = [
+        {
+            "message_id": 5402,
+            "date": 1755439769,
+            "text": """گردنت رو بنداز به یه همراه همه‌چیزتمام 🔥🎧
+گردن آویز و لاین مرواریدی، همراه با زنجیر طلایی این محصول
+
+قیمت: ۶۰۰۰۰۰ تومان""",
+            "photo": [{"file_id": "necklace-photo", "width": 900, "height": 900}],
+        }
+    ]
+
+    products = extract_eitaa_products(messages, max_products=10)
+
+    assert len(products) == 1
+    assert products[0].product_name == "گردن آویز و لاین مرواریدی"
+    assert products[0].price_toman == "600000"
+    assert products[0].best_photo.file_id == "necklace-photo"

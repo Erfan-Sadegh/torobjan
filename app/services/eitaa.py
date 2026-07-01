@@ -41,6 +41,7 @@ NOISE_LINE_PATTERNS = [
         r"آدرس",
         r"ساعت\s+کاری",
         r"سایت",
+        r"^سایز\s*[:：]",
         r"پرداخت",
         r"ارسال",
         r"مرجوع",
@@ -74,6 +75,70 @@ NOISE_LINE_PATTERNS = [
     ]
 ]
 PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+PRODUCT_NAME_KEYWORDS = {
+    "آویز",
+    "اسپری",
+    "ایرپاد",
+    "پاوربانک",
+    "پوشک",
+    "جارو",
+    "جعبه",
+    "خمیر",
+    "رب",
+    "روغن",
+    "زنجیر",
+    "شارژر",
+    "شامپو",
+    "صابون",
+    "عطر",
+    "قاب",
+    "کابل",
+    "کرم",
+    "کفش",
+    "کیف",
+    "گلس",
+    "گردن",
+    "گوشی",
+    "هندزفری",
+    "هدفون",
+    "هدست",
+    "هولدر",
+}
+MARKETING_NAME_WORDS = {
+    "آزاد",
+    "آسون",
+    "باحال",
+    "بادوام",
+    "تجربه",
+    "تماشای",
+    "جذاب",
+    "جاش",
+    "خونه",
+    "دید",
+    "دستت",
+    "دنیای",
+    "سر",
+    "طراحی",
+    "فیلم",
+    "محکم",
+    "مسیریابی",
+    "متفاوت",
+    "نصب",
+    "همراه",
+    "همراهته",
+    "همه",
+    "همه‌جا",
+    "همه‌چیزتمام",
+    "چه",
+}
+PRODUCT_NAME_STOP_PHRASES = [
+    " فقط ",
+    " همیشه ",
+    " که ",
+    " برای ",
+    " چه ",
+    "،",
+]
 
 
 def extract_eitaa_products(messages: list[dict], max_products: int) -> list[EitaaProductDraft]:
@@ -159,6 +224,7 @@ def _extract_product_entries(text: str, allow_missing_price: bool = False) -> li
     lines = [line for line in lines if line]
     entries: list[tuple[str, str | None]] = []
     current_name: str | None = None
+    candidate_names: list[str] = []
     for line in lines:
         if _is_noise_line(line):
             continue
@@ -169,14 +235,20 @@ def _extract_product_entries(text: str, allow_missing_price: bool = False) -> li
                 name = f"{current_name} {name}"
             entries.append((name, price))
             current_name = None
+            candidate_names = []
             continue
         price = _context_price(line)
         if price and current_name:
-            entries.append((current_name, price))
+            name = _best_product_name_candidate(candidate_names) or current_name
+            entries.append((name, price))
             current_name = None
+            candidate_names = []
             continue
         if _looks_like_name_line(line):
-            current_name = line[:500]
+            name = _clean_product_name(line)
+            if name:
+                candidate_names.append(line)
+                current_name = name
     if not entries:
         name = _extract_product_name(text)
         price = _extract_price_toman(text)
@@ -220,6 +292,7 @@ def _context_price(line: str) -> str | None:
 
 
 def _extract_product_name(text: str) -> str | None:
+    candidates: list[str] = []
     for raw_line in text.splitlines():
         line = _clean_line(raw_line)
         if not line:
@@ -230,8 +303,8 @@ def _extract_product_name(text: str) -> str | None:
             continue
         if len(_tokens(line)) < 2 and len(line) < 8:
             continue
-        return _clean_product_name(line)
-    return None
+        candidates.append(line)
+    return _best_product_name_candidate(candidates)
 
 
 def _extract_price_toman(text: str) -> str | None:
@@ -280,8 +353,56 @@ def _normalize_text(value: str) -> str:
     return text.strip()
 
 
+def _best_product_name_candidate(lines: list[str]) -> str | None:
+    best_name: str | None = None
+    best_score = -999
+    for line in lines:
+        name = _clean_product_name(line)
+        if not name:
+            continue
+        score = _product_name_candidate_score(name)
+        if score > best_score:
+            best_score = score
+            best_name = name
+    return best_name
+
+
+def _product_name_candidate_score(name: str) -> int:
+    tokens = _tokens(name)
+    token_set = set(tokens)
+    score = 0
+    if token_set & PRODUCT_NAME_KEYWORDS:
+        score += 10
+    if re.search(r"[A-Za-z][A-Za-z0-9-]*|[A-Za-z]*[0-9][A-Za-z0-9-]*", name):
+        score += 4
+    if len(tokens) <= 5:
+        score += 3
+    elif len(tokens) >= 12:
+        score -= 4
+    marketing_hits = token_set & MARKETING_NAME_WORDS
+    score -= min(10, len(marketing_hits) * 3)
+    if any(char in name for char in "!?؟"):
+        score -= 2
+    return score
+
+
+def _trim_product_name_tail(value: str) -> str:
+    text = value.strip()
+    for phrase in PRODUCT_NAME_STOP_PHRASES:
+        if phrase not in text:
+            continue
+        head, _separator, _tail = text.partition(phrase)
+        if not head.strip():
+            continue
+        head_tokens = set(_tokens(head))
+        if head_tokens & PRODUCT_NAME_KEYWORDS or re.search(r"[A-Za-z][A-Za-z0-9-]*|[A-Za-z]*[0-9][A-Za-z0-9-]*", head):
+            return head.strip()
+    return text
+
+
 def _clean_product_name(value: str) -> str | None:
     text = _clean_line(value)
+    text = _trim_product_name_tail(text)
     text = re.sub(r"^نام\s+محصول\s*:?\s*#?", "", text, flags=re.IGNORECASE)
     text = text.replace("#", "").replace("_", " ")
     text = re.sub(r"\b(?:کیلو|کیلویی|قیمت|محصول)\b", "", text).strip(" -:؛،")
