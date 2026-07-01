@@ -2608,6 +2608,20 @@ def test_index_has_loading_submit_state() -> None:
     assert "clarity.ms/tag" not in response.text
 
 
+def test_eitaa_primary_submit_posts_to_import_route() -> None:
+    """Human meaning: the main Eitaa button must post to /eitaa/import, not accidentally POST the /eitaa page and get 405."""
+    app = create_app()
+    client = TestClient(app)
+
+    response = client.get("/eitaa")
+
+    assert response.status_code == 200
+    assert 'action="/eitaa/import"' in response.text
+    assert 'formaction="/eitaa/import"' in response.text
+    assert 'formaction="/eitaa/update"' in response.text
+    assert 'getAttribute("formaction")' in response.text
+
+
 def test_health_endpoint() -> None:
     app = create_app()
     client = TestClient(app)
